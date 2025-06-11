@@ -1,0 +1,68 @@
+{
+  "name": "image-watch-for-visual-studio-code",
+  "displayName": "适用于 Visual Studio Code 的 Image Watch",
+  "description": "Provides a watch window for visualizing in-memory images (bitmaps) when debugging native C++ code for Visual Studio Code",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onDebug"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "image-watch-for-visual-studio-code.helloWorld",
+        "title": "Hello World"
+      },
+      {
+        "command": "image-watch-for-visual-studio-code.openImageWatch",
+        "title": "打开 Image Watch 面板"
+      }
+    ],
+    "viewsContainers": {
+      "panel": [
+        {
+          "id": "image-watch-container-panel",
+          "title": "图像监视",
+          "icon": "$(eye)"
+        }
+      ]
+    },
+    "views": {
+      "image-watch-container-panel": [
+        {
+          "type": "webview",
+          "id": "image-watch.panel",
+          "name": "图像监视面板",
+          "icon": "$(eye)",
+          "size": 1,
+          "visibility": "visible"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.100.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@typescript-eslint/eslint-plugin": "^8.31.1",
+    "@typescript-eslint/parser": "^8.31.1",
+    "eslint": "^9.25.1",
+    "typescript": "^5.8.3",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.5.2"
+  }
+}

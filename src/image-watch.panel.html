@@ -1,0 +1,127 @@
+<!-- 可直接用于 getHtmlForWebview 返回值 -->
+<!DOCTYPE html>
+<html lang="zh-cn">
+
+<head>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: #222;
+            color: #ccc;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        .sidebar {
+            width: 220px;
+            background: #1e1e1e;
+            border-right: 1px solid #333;
+            overflow-y: auto;
+            padding: 8px 0;
+        }
+
+        .thumb {
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            cursor: pointer;
+            border-bottom: 1px solid #333;
+            transition: background 0.2s;
+        }
+
+        .thumb.selected {
+            background: #333;
+        }
+
+        .thumb img {
+            width: 48px;
+            height: 48px;
+            object-fit: contain;
+            background: #444;
+            margin-right: 10px;
+            border-radius: 4px;
+        }
+
+        .thumb .info {
+            flex: 1;
+        }
+
+        .main {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #2d2d2d;
+        }
+
+        .main img {
+            max-width: 90%;
+            max-height: 90%;
+            border-radius: 6px;
+            background: #444;
+            box-shadow: 0 0 8px #111;
+        }
+
+        .placeholder {
+            color: #888;
+            font-size: 1.2em;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="sidebar" id="thumbList">
+            <!-- 缩略图列表 -->
+        </div>
+        <div class="main" id="mainView">
+            <div class="placeholder">[无选择]</div>
+        </div>
+    </div>
+    <script>
+        // 示例图片数据
+        const images = [
+            { name: "图片1", src: "https://via.placeholder.com/120x80?text=1", desc: "cv::Mat" },
+            { name: "图片2", src: "https://via.placeholder.com/120x80?text=2", desc: "cv::Mat" },
+            { name: "图片3", src: "https://via.placeholder.com/120x80?text=3", desc: "cv::Mat" }
+        ];
+
+        const thumbList = document.getElementById('thumbList');
+        const mainView = document.getElementById('mainView');
+
+        function renderThumbs() {
+            thumbList.innerHTML = '';
+            images.forEach((img, idx) => {
+                const div = document.createElement('div');
+                div.className = 'thumb';
+                div.innerHTML = `
+          <img src="${img.src}" alt="${img.name}">
+          <div class="info">
+            <div>${img.name}</div>
+            <div style="font-size:12px;color:#888;">${img.desc}</div>
+          </div>
+        `;
+                div.onclick = () => selectImage(idx);
+                thumbList.appendChild(div);
+            });
+        }
+
+        function selectImage(idx) {
+            // 取消所有选中
+            Array.from(thumbList.children).forEach(el => el.classList.remove('selected'));
+            thumbList.children[idx].classList.add('selected');
+            // 显示大图
+            mainView.innerHTML = `<img src="${images[idx].src}" alt="${images[idx].name}">`;
+        }
+
+        renderThumbs();
+        // 默认不选中
+    </script>
+</body>
+
+</html>
