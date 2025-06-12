@@ -1,26 +1,58 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Congratulations, your extension "image-watch-for-visual-studio-code" is now active!');
 
-	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider(
-			'image-watch.panel', // 必须与 package.json 里的 id 一致
-			new ImageWatchWebviewViewProvider(context)
-		)
-	);
-	context.subscriptions.push(
-		vscode.commands.registerCommand('image-watch-for-visual-studio-code.openImageWatch', () => {
-			vscode.window.showInformationMessage('请在底部面板查看 Image Watch 视图');
-		})
-	);
+	// hello 命令
+	context.subscriptions.push(vscode.commands.registerCommand('image-watch-for-visual-studio-code.hello', () => {
+		vscode.window.showInformationMessage('Hello from 适用于 Visual Studio Code 的 Image Watch!');
+	}));
+	// 激活 Image Watch 面板
+	context.subscriptions.push(vscode.commands.registerCommand('image-watch-for-visual-studio-code.open_image_watch_panel', () => {
+		vscode.window.showInformationMessage('请在底部面板查看 Image Watch 视图');
+		vscode.commands.executeCommand('image-watch.panel.focus');
+	}));
 
-	const disposable = vscode.commands.registerCommand('image-watch-for-visual-studio-code.helloWorld', () => {
-		vscode.window.showInformationMessage('Hello World from 适用于 Visual Studio Code 的 Image Watch!');
-	});
-	context.subscriptions.push(disposable);
+	// 注册 Image Watch 面板
+	context.subscriptions.push(vscode.window.registerWebviewViewProvider(
+		'image-watch.panel', // 必须与 package.json 里的 id 一致
+		new ImageWatchWebviewViewProvider(context)
+	));
+	// 注册变量右键菜单
+	context.subscriptions.push(vscode.commands.registerCommand('image-watch-for-visual-studio-code.add_to_watch_image', async (current_var) => {
+		if (current_var.container.name != 'Locals')
+			return vscode.window.showErrorMessage('只能添加局部变量到 Image Watch 面板');
+		if (!current_var || !current_var.variable || !current_var.variable.variablesReference)
+			return vscode.window.showErrorMessage('当前变量无效或未定义');
+
+		const session = vscode.debug.activeDebugSession;
+		if (!session)
+			return vscode.window.showErrorMessage('没有活动的调试会话');
+
+		const var_request = await session.customRequest('variables', { variablesReference: current_var.variable.variablesReference });
+		if (var_request == undefined)
+			return vscode.window.showErrorMessage('未能从调试会话获取变量');
+
+		let variables: any[] = [];
+		if (Array.isArray(var_request)) // 据说有些调试器会直接返回数组
+			variables = var_request;
+		else if (var_request.variables && Array.isArray(var_request.variables))
+			variables = var_request.variables;
+		else
+			return vscode.window.showErrorMessage('获取到的变量数据格式不正确');
+
+		if (variables.length == 0)
+			return vscode.window.showErrorMessage('变量数据成员为空');
+		console.log(`当前变量: ${current_var.variable.name}, 变量列表:`, variables);
+
+
+		if (current_var && current_var.name) {
+			// 这里可以实现将变量添加到 Image Watch 的逻辑
+			// 例如，发送消息到 webview 或更新某个状态
+		} else {
+			vscode.window.showErrorMessage('无法添加未定义的变量到 Image Watch');
+		}
+	}));
 }
 
 

@@ -16,12 +16,17 @@
   "contributes": {
     "commands": [
       {
-        "command": "image-watch-for-visual-studio-code.helloWorld",
-        "title": "Hello World"
+        "command": "image-watch-for-visual-studio-code.hello",
+        "title": "Hello Image Watch"
       },
       {
-        "command": "image-watch-for-visual-studio-code.openImageWatch",
+        "command": "image-watch-for-visual-studio-code.open_image_watch_panel",
         "title": "打开 Image Watch 面板"
+      },
+      {
+        "command": "image-watch-for-visual-studio-code.add_to_watch_image",
+        "title": "添加到 Image Watch",
+        "enablement": "inDebugMode"
       }
     ],
     "viewsContainers": {
@@ -42,6 +47,15 @@
           "icon": "$(eye)",
           "size": 1,
           "visibility": "visible"
+        }
+      ]
+    },
+    "menus": {
+      "debug/variables/context": [
+        {
+          "when": "debugStartLanguage=='cuda-cpp' || debugStartLanguage=='cpp'",
+          "command": "image-watch-for-visual-studio-code.add_to_watch_image",
+          "group": "3_compare"
         }
       ]
     }
