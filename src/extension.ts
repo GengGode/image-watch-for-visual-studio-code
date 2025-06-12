@@ -16,7 +16,8 @@ export function activate(context: vscode.ExtensionContext) {
 	// 注册 Image Watch 面板
 	context.subscriptions.push(vscode.window.registerWebviewViewProvider(
 		'image-watch.panel', // 必须与 package.json 里的 id 一致
-		new ImageWatchWebviewViewProvider(context)
+		new ImageWatchWebviewViewProvider(context),
+		{ webviewOptions: { retainContextWhenHidden: true } }// 保持上下文，当面板隐藏时
 	));
 	// 注册变量右键菜单
 	context.subscriptions.push(vscode.commands.registerCommand('image-watch-for-visual-studio-code.add_to_watch_image', async (current_var) => {
@@ -29,20 +30,17 @@ export function activate(context: vscode.ExtensionContext) {
 		if (!session)
 			return vscode.window.showErrorMessage('没有活动的调试会话');
 
+		// https://microsoft.github.io/debug-adapter-protocol/specification
 		const var_request = await session.customRequest('variables', { variablesReference: current_var.variable.variablesReference });
 		if (var_request == undefined)
 			return vscode.window.showErrorMessage('未能从调试会话获取变量');
-
-		let variables: any[] = [];
-		if (Array.isArray(var_request)) // 据说有些调试器会直接返回数组
-			variables = var_request;
-		else if (var_request.variables && Array.isArray(var_request.variables))
-			variables = var_request.variables;
-		else
+		// cppvsdbg
+		const variables = var_request.variables;
+		if (!Array.isArray(variables))
 			return vscode.window.showErrorMessage('获取到的变量数据格式不正确');
-
 		if (variables.length == 0)
 			return vscode.window.showErrorMessage('变量数据成员为空');
+
 		console.log(`当前变量: ${current_var.variable.name}, 变量列表:`, variables);
 
 
@@ -64,9 +62,7 @@ class ImageWatchWebviewViewProvider implements vscode.WebviewViewProvider {
 		context: vscode.WebviewViewResolveContext,
 		token: vscode.CancellationToken
 	) {
-		webviewView.webview.options = {
-			enableScripts: true
-		};
+		webviewView.webview.options = { enableScripts: true }; // 允许脚本执行
 
 		// 这里可以传递数据到 webview
 		webviewView.webview.html = this.getHtmlForWebview(['图片1', '图片2']);
