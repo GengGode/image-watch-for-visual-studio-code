@@ -98,25 +98,29 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.executeCommand('image-watch.panel.focus');
 
     // 获取内存数据转为Uint8Array
+    // https://microsoft.github.io/debug-adapter-protocol/specification
+    /*interface ReadMemoryResponse extends Response {
+        body?: {
+          address: string;
+          unreadableBytes ?: number;
+          data ?: string;
+        };
+      }
+    */
     const memory_data = await session.customRequest('readMemory', { memoryReference: mat.datastart.hex, offset: 0, count: mat.dataend.addr - mat.datastart.addr });
-    if (!memory_data || !Array.isArray(memory_data.data) || memory_data.data.length === 0) {
-      return vscode.window.showErrorMessage('无法读取内存数据');
+    if (!memory_data || !memory_data.data) {
+      return vscode.window.showErrorMessage('无法读取内存数据，请检查调试会话是否正常');
     }
-    // 将内存数据转换为 Uint8Array
-    const memory_buffer = new Uint8Array(memory_data.data);
+    // 将 base64 编码的内存数据转换为 Uint8Array
+    const memory = Uint8Array.from(Buffer.from(memory_data.data, 'base64'));
 
     ImageWatchWebviewViewProvider.onReady(async (view) => {
       // 发送消息到 webview，通知它添加变量
       view.webview.postMessage({
         command: 'add_variable',
-        variables: variables,
-        // debug_session: session.id,
-        origin_variable: current_var,
         variable_name: current_var.variable.name,
-        variable_buffer: memory_buffer
-        // threadId: current_var.threadId,
-        // callStack: current_var.callStack,
-        // locals: current_var.locals,
+        memory_base64: memory_data.data,
+        mat: mat
       });
     });
 
