@@ -116,6 +116,7 @@
             <div class="main" id="currentImage">
                 <!-- 这里显示当前选中的图片 -->
                 <div class="placeholder">[无选择]</div>
+                <canvas id="mainCanvas" style="max-width: 90%; max-height: 90%;"></canvas>
             </div>
         </div>
     </div>
@@ -134,36 +135,30 @@
             }
 
             // 处理变量数据
-            const { mat, origin_variable, variable_name, memory_base64 } = event.data;
+            const { mat, origin_variable, variable_name, memory } = event.data;
             console.log('Received mat:', mat);
             console.log('Origin variable:', origin_variable);
             console.log('Variable name:', variable_name);
-            console.log('memory (base64):', memory_base64);
-            // base64是内存数据的编码
-            // 转为Uint8Array
-            // const memory = Uint8Array.from(Buffer.from(memory_data.data, 'base64'));
-            console.log('Memory data as Uint8Array:', memory);
+            console.log('memory:', memory);
 
+            // 直接创建 ImageData 对象
+            const imageData = new ImageData(new Uint8ClampedArray(memory), mat.cols, mat.rows);
+            console.log("ImageData created:", imageData);
 
-            //<div class="placeholder">[无选择]</div>
-            // 这里可以根据接收到的数据更新UI
-            const placeholder = document.querySelector('.placeholder');
-            if (placeholder) {
-                placeholder.remove();
+            const canvas = document.getElementById('mainCanvas');
+            if (!canvas) {
+                console.error('Canvas element not found');
+                return;
             }
-            const currentImage = document.getElementById('currentImage');
-            currentImage.innerHTML = `<img id="mainImg" src="base64,${memory_base64}" alt="${variable_name}" style="cursor: grab; transition: transform 0.1s;" />`;
-            const img = document.getElementById('mainImg');
-            if (img) {
-                img.onload = () => {
-                    // 图片加载完成后可以进行其他操作
-                    console.log('Image loaded:', img);
-                };
-                img.onerror = () => {
-                    console.error('Failed to load image from base64 data');
-                };
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                console.error('Failed to get canvas context');
+                return;
             }
-
+            canvas.width = mat.cols;
+            canvas.height = mat.rows;
+            ctx.putImageData(imageData, 0, 0);
+            console.log('ImageData drawn on canvas:', canvas);
         });
         // 互斥按钮逻辑
         const btnLocal = document.getElementById('btnLocal');

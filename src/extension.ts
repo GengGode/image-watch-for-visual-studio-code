@@ -119,7 +119,7 @@ export function activate(context: vscode.ExtensionContext) {
       view.webview.postMessage({
         command: 'add_variable',
         variable_name: current_var.variable.name,
-        memory_base64: memory_data.data,
+        memory: memory,
         mat: mat
       });
     });
