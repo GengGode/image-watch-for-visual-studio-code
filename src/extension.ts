@@ -1,298 +1,126 @@
 import * as vscode from 'vscode';
+import { ImageWatchWebviewViewProvider } from './image-watch-webview-view';
+import { debug } from 'console';
 
 export function activate(context: vscode.ExtensionContext) {
-	console.log('Congratulations, your extension "image-watch-for-visual-studio-code" is now active!');
+  console.log('Congratulations, your extension "image-watch-for-visual-studio-code" is now active!');
 
-	// hello 命令
-	context.subscriptions.push(vscode.commands.registerCommand('image-watch-for-visual-studio-code.hello', () => {
-		vscode.window.showInformationMessage('Hello from 适用于 Visual Studio Code 的 Image Watch!');
-	}));
-	// 激活 Image Watch 面板
-	context.subscriptions.push(vscode.commands.registerCommand('image-watch-for-visual-studio-code.open_image_watch_panel', () => {
-		vscode.window.showInformationMessage('请在底部面板查看 Image Watch 视图');
-		vscode.commands.executeCommand('image-watch.panel.focus');
-	}));
+  // hello 命令
+  context.subscriptions.push(vscode.commands.registerCommand('image-watch-for-visual-studio-code.hello', () => {
+    vscode.window.showInformationMessage('Hello from 适用于 Visual Studio Code 的 Image Watch!');
+  }));
+  // 激活 Image Watch 面板
+  context.subscriptions.push(vscode.commands.registerCommand('image-watch-for-visual-studio-code.open_image_watch_panel', () => {
+    vscode.window.showInformationMessage('请在底部面板查看 Image Watch 视图');
+    vscode.commands.executeCommand('image-watch.panel.focus');
+  }));
 
-	// 注册 Image Watch 面板
-	context.subscriptions.push(vscode.window.registerWebviewViewProvider(
-		'image-watch.panel', // 必须与 package.json 里的 id 一致
-		new ImageWatchWebviewViewProvider(context),
-		{ webviewOptions: { retainContextWhenHidden: true } }// 保持上下文，当面板隐藏时
-	));
-	// 注册变量右键菜单
-	context.subscriptions.push(vscode.commands.registerCommand('image-watch-for-visual-studio-code.add_to_watch_image', async (current_var) => {
-		if (current_var.container.name != 'Locals')
-			return vscode.window.showErrorMessage('只能添加局部变量到 Image Watch 面板');
-		if (!current_var || !current_var.variable || !current_var.variable.variablesReference)
-			return vscode.window.showErrorMessage('当前变量无效或未定义');
-
-		const session = vscode.debug.activeDebugSession;
-		if (!session)
-			return vscode.window.showErrorMessage('没有活动的调试会话');
-
-		// https://microsoft.github.io/debug-adapter-protocol/specification
-		const var_request = await session.customRequest('variables', { variablesReference: current_var.variable.variablesReference });
-		if (var_request == undefined)
-			return vscode.window.showErrorMessage('未能从调试会话获取变量');
-		// cppvsdbg
-		const variables = var_request.variables;
-		if (!Array.isArray(variables))
-			return vscode.window.showErrorMessage('获取到的变量数据格式不正确');
-		if (variables.length == 0)
-			return vscode.window.showErrorMessage('变量数据成员为空');
-
-		console.log(`当前变量: ${current_var.variable.name}, 变量列表:`, variables);
-
-
-		if (current_var && current_var.name) {
-			// 这里可以实现将变量添加到 Image Watch 的逻辑
-			// 例如，发送消息到 webview 或更新某个状态
-		} else {
-			vscode.window.showErrorMessage('无法添加未定义的变量到 Image Watch');
-		}
-	}));
-}
-
-
-class ImageWatchWebviewViewProvider implements vscode.WebviewViewProvider {
-	constructor(private readonly context: vscode.ExtensionContext) { }
-
-	resolveWebviewView(
-		webviewView: vscode.WebviewView,
-		context: vscode.WebviewViewResolveContext,
-		token: vscode.CancellationToken
-	) {
-		webviewView.webview.options = { enableScripts: true }; // 允许脚本执行
-
-		// 这里可以传递数据到 webview
-		webviewView.webview.html = this.getHtmlForWebview(['图片1', '图片2']);
-
-		// 监听 webview 消息
-		webviewView.webview.onDidReceiveMessage(message => {
-			if (message.command === 'refresh') {
-				// 处理刷新等操作
-			}
-		});
-	}
-
-	getHtmlForWebview(images: string[]): string {
-		return `<!-- 可直接用于 getHtmlForWebview 返回值 -->
-<!DOCTYPE html>
-<html lang="zh-cn">
-<head>
-  <style>
-    body {
-      margin: 0;
-      padding: 0;
-      font-family: "Segoe UI", Arial, sans-serif;
-      background: #222;
-      color: #ccc;
-    }
-    .toolbar {
-      display: flex;
-      align-items: center;
-      padding: 8px 12px;
-      background: #181818;
-      border-bottom: 1px solid #333;
-    }
-    .toggle-btn {
-      appearance: none;
-      outline: none;
-      border: 1px solid #444;
-      background: #222;
-      color: #ccc;
-      padding: 4px 16px;
-      margin-right: 12px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-      transition: background 0.2s, border 0.2s;
-    }
-    .toggle-btn.selected {
-      background: #007acc;
-      color: #fff;
-      border-color: #007acc;
-    }
-    .container {
-      display: flex;
-      height: calc(100vh - 40px);
-    }
-    .sidebar {
-      width: 220px;
-      background: #1e1e1e;
-      border-right: 1px solid #333;
-      overflow-y: auto;
-      padding: 8px 0;
-    }
-    .thumb {
-      display: flex;
-      align-items: center;
-      padding: 8px;
-      cursor: pointer;
-      border-bottom: 1px solid #333;
-      transition: background 0.2s;
-    }
-    .thumb.selected {
-      background: #333;
-    }
-    .thumb img {
-      width: 48px;
-      height: 48px;
-      object-fit: contain;
-      background: #444;
-      margin-right: 10px;
-      border-radius: 4px;
-    }
-    .thumb .info {
-      flex: 1;
-    }
-    .main {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #2d2d2d;
-    }
-    .main img {
-      max-width: 90%;
-      max-height: 90%;
-      border-radius: 6px;
-      background: #444;
-      box-shadow: 0 0 8px #111;
-    }
-    .placeholder {
-      color: #888;
-      font-size: 1.2em;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="sidebar" id="thumbList">
-		<div class="toolbar">
-			<button id="btnLocal" class="toggle-btn selected">局部变量</button>
-			<button id="btnWatch" class="toggle-btn">监视</button>
-		</div>
-		<div class="sidebar" id="varList">
-			<!-- 这里可以动态生成局部变量或监视列表 -->
-		</div>
-    </div>
-    <div class="main" id="mainView">
-		<div class="main" id="currentImage">
-			<!-- 这里显示当前选中的图片 -->
-			<div class="placeholder">[无选择]</div>
-		</div>
-    </div>
-  </div>
-  <script>
-    // 互斥按钮逻辑
-    const btnLocal = document.getElementById('btnLocal');
-    const btnWatch = document.getElementById('btnWatch');
-    btnLocal.onclick = () => {
-      btnLocal.classList.add('selected');
-      btnWatch.classList.remove('selected');
-      // TODO: 切换到局部变量数据
-    };
-    btnWatch.onclick = () => {
-      btnWatch.classList.add('selected');
-      btnLocal.classList.remove('selected');
-      // TODO: 切换到监视数据
-    };
-
-    // 示例图片数据
-    const images = [
-      { name: "图片1", src: "https://via.placeholder.com/120x80?text=1", desc: "cv::Mat" },
-      { name: "图片2", src: "https://via.placeholder.com/120x80?text=2", desc: "cv::Mat" },
-      { name: "图片3", src: "https://via.placeholder.com/120x80?text=3", desc: "cv::Mat" }
-    ];
-
-    const varList = document.getElementById('varList');
-    const currentImage = document.getElementById('currentImage');
-
-    function renderThumbs() {
-      varList.innerHTML = '';
-      images.forEach((img, idx) => {
-        const div = document.createElement('div');
-        div.className = 'thumb';
-        div.innerHTML = \`
-			<img src = "\${img.src}" alt = "\${img.name}">
-				<div class="info" >
-					<div>\${ img.name } </div>
-						<div style = "font-size:12px;color:#888;"> \${ img.desc } </div>
-							</div>
-								\`;
-        div.onclick = () => selectImage(idx);
-        varList.appendChild(div);
-      });
-    }
-
-let scale = 1;
-let translateX = 0;
-let translateY = 0;
-let isDragging = false;
-let startX = 0;
-let startY = 0;
-
-function updateTransform() {
-  const img = document.getElementById('mainImg');
-  if (img) {
-    img.style.transform = \`scale(\${ scale }) translate(\${ translateX }px, \${ translateY }px)\`;
+  if (!ImageWatchWebviewViewProvider.global_view) {
+    // 如果全局视图未定义，创建一个新的
+    new ImageWatchWebviewViewProvider(context);
   }
-}
 
-currentImage.addEventListener('wheel', (e) => {
-  e.preventDefault();
-  // 缩放
-  const delta = e.deltaY > 0 ? -0.1 : 0.1;
-  scale = Math.max(0.1, scale + delta);
-  updateTransform();
-}, { passive: false });
+  // 注册 Image Watch 面板
+  context.subscriptions.push(vscode.window.registerWebviewViewProvider(
+    'image-watch.panel', // 必须与 package.json 里的 id 一致
+    new ImageWatchWebviewViewProvider(context),
+    { webviewOptions: { retainContextWhenHidden: true } }// 保持上下文，当面板隐藏时
+  ));
 
-currentImage.addEventListener('mousedown', (e) => {
-  const img = document.getElementById('mainImg');
-  if (!img) return;
-  isDragging = true;
-  startX = e.clientX - translateX;
-  startY = e.clientY - translateY;
-  img.style.cursor = 'grabbing';
-});
+  // 注册变量右键菜单
+  context.subscriptions.push(vscode.commands.registerCommand('image-watch-for-visual-studio-code.add_to_watch_image', async (current_var) => {
+    if (current_var.container.name != 'Locals')
+      return vscode.window.showErrorMessage('只能添加局部变量到 Image Watch 面板');
+    if (!current_var || !current_var.variable || !current_var.variable.variablesReference)
+      return vscode.window.showErrorMessage('当前变量无效或未定义');
 
-currentImage.addEventListener('mousemove', (e) => {
-  if (!isDragging) return;
-  translateX = e.clientX - startX;
-  translateY = e.clientY - startY;
-  updateTransform();
-});
+    const session = vscode.debug.activeDebugSession;
+    if (!session)
+      return vscode.window.showErrorMessage('没有活动的调试会话');
 
-currentImage.addEventListener('mouseup', () => {
-  isDragging = false;
-  const img = document.getElementById('mainImg');
-  if (img) img.style.cursor = 'grab';
-});
+    // https://microsoft.github.io/debug-adapter-protocol/specification
+    const var_request = await session.customRequest('variables', { variablesReference: current_var.variable.variablesReference });
+    if (var_request == undefined)
+      return vscode.window.showErrorMessage('未能从调试会话获取变量');
+    // cppvsdbg
+    const variables = var_request.variables;
+    if (!Array.isArray(variables))
+      return vscode.window.showErrorMessage('获取到的变量数据格式不正确');
+    if (variables.length == 0)
+      return vscode.window.showErrorMessage('变量数据成员为空');
+    if (variables.length != 12)
+      return vscode.window.showErrorMessage('变量数据成员数量不正确, 可能不是cv::Mat类型');
+    // 检查变量是否为 cv::Mat 类型
+    if (variables[0].name != 'flags' || variables[1].name != 'dims' || variables[2].name != 'rows' ||
+      variables[3].name != 'cols' || variables[4].name != 'data' || variables[5].name != 'datastart' ||
+      variables[6].name != 'dataend' || variables[7].name != 'datalimit' || variables[8].name != 'allocator' ||
+      variables[9].name != 'u' || variables[10].name != 'size' || variables[11].name != 'step') {
+      return vscode.window.showErrorMessage('变量数据格式不正确, 可能不是 cv::Mat 类型');
+    }
+    function parse_int_key(variable: any): number {
+      if (variable.type != 'int') {
+        vscode.window.showErrorMessage(`变量 ${variable.name} 的类型不是 int`);
+        return 0;
+      }
+      return parseInt(variable.value);
+    }
+    class ptr { addr!: number; hex!: String; };
+    function parse_ptr_key(variable: any): ptr {
+      if (variable.type != 'unsigned char *' && variable.type != 'const unsigned char *') {
+        vscode.window.showErrorMessage(`变量 ${variable.name} 的类型不是 unsigned char * 或 const unsigned char *`);
+        return { addr: 0, hex: '0x0000000000000000' };
+      }
+      // 直接取固定长度的十六进制地址 将十六进制地址转换为十进制整数
+      const hex_value = variable.value.substr(0, 18); // 去掉前缀 '0x'
+      const decimal_value = parseInt(hex_value);
+      return { addr: decimal_value, hex: hex_value };
+    }
 
-currentImage.addEventListener('mouseleave', () => {
-  isDragging = false;
-  const img = document.getElementById('mainImg');
-  if (img) img.style.cursor = 'grab';
-});
 
+    const mat = {
+      flags: parse_int_key(variables[0]),
+      dims: parse_int_key(variables[1]),
+      rows: parse_int_key(variables[2]),
+      cols: parse_int_key(variables[3]),
+      data: parse_ptr_key(variables[4]),
+      datastart: parse_ptr_key(variables[5]),
+      dataend: parse_ptr_key(variables[6]),
+      datalimit: parse_ptr_key(variables[7]),
 
+      // allocator: variables[8].value,
+      // u:         variables[9].value,
+      // size:      variables[10].value,
+      // step:      variables[11].value
+    };
 
-function selectImage(idx) {
-  Array.from(varList.children).forEach(el => el.classList.remove('selected'));
-  varList.children[idx].classList.add('selected');
-  scale = 1;
-  translateX = 0;
-  translateY = 0;
-  currentImage.innerHTML = \`<img id = "mainImg" src = "\${images[idx].src}" alt = "\${images[idx].name}" style = "cursor: grab; transition: transform 0.1s;" />\`;
-  updateTransform();
-}
-    renderThumbs();
-  </script>
-</body>
-</html>`;
+    console.log(`当前变量: ${current_var.variable.name}, 变量列表:`, variables);
 
-	}
+    vscode.commands.executeCommand('image-watch.panel.focus');
+
+    // 获取内存数据转为Uint8Array
+    const memory_data = await session.customRequest('readMemory', { memoryReference: mat.datastart.hex, offset: 0, count: mat.dataend.addr - mat.datastart.addr });
+    if (!memory_data || !Array.isArray(memory_data.data) || memory_data.data.length === 0) {
+      return vscode.window.showErrorMessage('无法读取内存数据');
+    }
+    // 将内存数据转换为 Uint8Array
+    const memory_buffer = new Uint8Array(memory_data.data);
+
+    ImageWatchWebviewViewProvider.onReady(async (view) => {
+      // 发送消息到 webview，通知它添加变量
+      view.webview.postMessage({
+        command: 'add_variable',
+        variables: variables,
+        // debug_session: session.id,
+        origin_variable: current_var,
+        variable_name: current_var.variable.name,
+        variable_buffer: memory_buffer
+        // threadId: current_var.threadId,
+        // callStack: current_var.callStack,
+        // locals: current_var.locals,
+      });
+    });
+
+  }));
 }
 
 // This method is called when your extension is deactivated
