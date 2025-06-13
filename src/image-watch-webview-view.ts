@@ -26,7 +26,7 @@ export class ImageWatchWebviewViewProvider implements vscode.WebviewViewProvider
     webviewView.webview.options = { enableScripts: true }; // 允许脚本执行
 
     // 这里可以传递数据到 webview
-    webviewView.webview.html = this.getHtmlForWebviewFromFile();
+    webviewView.webview.html = this.getHtmlForWebviewFromFile(webviewView.webview);
     // 监听 webview 消息
     webviewView.webview.onDidReceiveMessage(message => {
       if (message.command === 'refresh') {
@@ -40,10 +40,13 @@ export class ImageWatchWebviewViewProvider implements vscode.WebviewViewProvider
     ImageWatchWebviewViewProvider.onReadyCallbacks.forEach(callback => callback(webviewView));
     ImageWatchWebviewViewProvider.onReadyCallbacks = []; // 清空回调列表
   }
-  getHtmlForWebviewFromFile() {
+  getHtmlForWebviewFromFile(webview: vscode.Webview) {
     try {
       // return fs.readFileSync(vscode.Uri.file(path.join(this.context.extensionPath, 'resources', 'image-watch-panel.html')).with({ scheme: 'vscode-resource' }).toString(), 'utf-8');
-      return fs.readFileSync(path.join(this.context.extensionPath, 'resources', 'image-watch-panel.html'), 'utf-8');
+      let html = fs.readFileSync(path.join(this.context.extensionPath, 'resources', 'image-watch-panel.html'), 'utf-8');
+      const opencvUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'opencv.js'));
+      html = html.replace('<!-- opencv.js -->', opencvUri.toString());
+      return html;
     } catch (err) {
       return `<html><body><h2>无法加载 image-watch-panel.html</h2><pre>${err}</pre></body></html>`;
     }
