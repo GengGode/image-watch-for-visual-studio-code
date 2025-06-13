@@ -120,7 +120,33 @@
             </div>
         </div>
     </div>
+    <script src="<!-- opencv.js -->" type="text/javascript"></script>
     <script>
+        let cvReady = false;
+        let cvInstance = null;
+
+        if (window.cv && typeof window.cv.then === 'function') {
+            console.log('OpenCV.js 加载');
+            // 新版异步加载
+            window.cv.then((cv) => {
+                cvReady = true;
+                cvInstance = cv;
+                console.log('OpenCV.js 已加载完成', cv);
+                // 你可以在这里注册 message 事件，或设置全局 ready 标志
+                window.cv['onRuntimeInitialized'] = () => {
+                    console.log('OpenCV.js Runtime Initialized');
+                };
+            });
+        } else {
+            console.log('OpenCV.js onRuntimeInitialized 加载');
+            // 传统同步加载
+            window.cv['onRuntimeInitialized'] = () => {
+                cvReady = true;
+                cvInstance = window.cv;
+                console.log('OpenCV.js 已加载完成', window.cv);
+            };
+        }
+
         // 监听器函数
         const vscode = acquireVsCodeApi();
         window.addEventListener('message', event => {
@@ -135,15 +161,78 @@
             }
 
             // 处理变量数据
-            const { mat, origin_variable, variable_name, memory } = event.data;
-            console.log('Received mat:', mat);
-            console.log('Origin variable:', origin_variable);
+            const { mat, variable_name, memory } = event.data;
+            const mat_is_submat = mat.flags & 0x4000; // CV_MAT_SUBMATRIX_FLAG
+            const mat_is_continuous = mat.flags & 0x200; // CV_MAT_CONT_FLAG
+            const mat_type = mat.flags & 0xFFF;
             console.log('Variable name:', variable_name);
             console.log('memory:', memory);
+            console.log('mat:', mat);
 
-            // 直接创建 ImageData 对象
-            const imageData = new ImageData(new Uint8ClampedArray(memory), mat.cols, mat.rows);
-            console.log("ImageData created:", imageData);
+            // 等待 opencv.js 加载完成
+            if (!cvReady) {
+                console.error('OpenCV.js 尚未加载完成');
+                return;
+            }
+            console.log('mat.type:', mat_type, typeof mat.flags);
+
+            let image = null;
+            // 处理 Mat 引用其他 Mat 的部分区域的情况
+            if (!mat_is_submat) {
+                console.warn('Mat is not continuous, converting to continuous Mat');
+                // 如果不是连续的 Mat，通过 addr.start 和 addr.end 获取连续内存
+                const use_addr = mat.data.addr;
+                const addr = mat.datastart.addr;
+                const size = mat.dataend.addr - addr;
+                const skip = use_addr - addr;
+                const ref_cols = mat.step[0];
+                const ref_rows = size / ref_cols;
+                console.log('Reference rows:', ref_rows, 'Reference cols:', ref_cols);
+                console.log('Mat address:', addr, 'Size:', size, 'Skip:', skip);
+                let pos = [Math.floor(skip / ref_cols), Math.floor(skip % ref_cols)];
+                console.log('Mat position:', pos);
+                // 创建一个新的连续 Mat
+                const ref_mat = new cvInstance.matFromArray(
+                    ref_rows, ref_cols, mat_type, memory
+                );
+                console.log('Creating cv.Mat from memory:', ref_mat);
+                const roi = new cvInstance.Rect(pos[1], pos[0], mat.cols, mat.rows);
+                console.log('Creating ROI:', roi);
+                // 使用 ROI 创建新的 Mat
+                let roi_mat = ref_mat.roi(roi);
+                console.log('New Mat after ROI:', roi_mat);
+                image = roi_mat.clone();
+                // 清理临时 Mat
+                ref_mat.delete();
+                roi_mat.delete();
+            }
+            else {
+                console.log('Mat is continuous, using it directly');
+                // 如果是连续的 Mat，直接使用
+                image = new cvInstance.matFromArray(mat.rows, mat.cols, mat_type, memory);
+            }
+            console.log('Creating cv.Mat from memory:', image);
+            // 统一转为 CV_8UC4
+            // 先处理浮点数类型
+            if (image.type() === cvInstance.CV_32FC1 || image.type() === cvInstance.CV_32FC3) {
+                console.log('Converting CV_32F to CV_8UC4');
+                image.convertTo(image, cvInstance.CV_8UC4, 255.0);
+            } else if (image.type() === cvInstance.CV_8UC1) {
+                console.log('Converting CV_8UC1 to CV_8UC4');
+                let temp = new cvInstance.Mat();
+                cvInstance.cvtColor(image, temp, cvInstance.COLOR_GRAY2RGBA);
+                image.delete();
+                image = temp;
+            } else if (image.type() === cvInstance.CV_8UC3) {
+                console.log('Converting CV_8UC3 to CV_8UC4');
+                let temp = new cvInstance.Mat();
+                cvInstance.cvtColor(image, temp, cvInstance.COLOR_RGB2RGBA);
+                image.delete();
+                image = temp;
+            } else if (image.type() !== cvInstance.CV_8UC4) {
+                console.error('Unsupported mat type:', image.type());
+                return;
+            }
 
             const canvas = document.getElementById('mainCanvas');
             if (!canvas) {
@@ -157,7 +246,15 @@
             }
             canvas.width = mat.cols;
             canvas.height = mat.rows;
+            const imageData = new ImageData(
+                new Uint8ClampedArray(image.data),
+                image.cols,
+                image.rows
+            );
             ctx.putImageData(imageData, 0, 0);
+
+            // 清理 cv.Mat
+            image.delete();
             console.log('ImageData drawn on canvas:', canvas);
         });
         // 互斥按钮逻辑

@@ -75,7 +75,24 @@ export function activate(context: vscode.ExtensionContext) {
       const decimal_value = parseInt(hex_value);
       return { addr: decimal_value, hex: hex_value };
     }
-
+    function parse_step_key(variable: any): number[] {
+      // 匹配 buf={20, 1}
+      const step_str = String(variable.value);
+      const bufMatch = step_str.match(/buf=\S+\s*\{([^\}]*)\}/);
+      let buf_array: number[] = [];
+      if (bufMatch && bufMatch[1]) {
+        buf_array = bufMatch[1].split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+      }
+      // 匹配第一个 {20}
+      const firstMatch = step_str.match(/\{(\d+)\}/);
+      if (firstMatch && firstMatch[1]) {
+        // 只有当 buf 不包含第一个元素时才加上
+        if (buf_array.length === 0 || buf_array[0] !== parseInt(firstMatch[1])) {
+          buf_array.unshift(parseInt(firstMatch[1]));
+        }
+      }
+      return buf_array;
+    }
 
     const mat = {
       flags: parse_int_key(variables[0]),
@@ -89,8 +106,8 @@ export function activate(context: vscode.ExtensionContext) {
 
       // allocator: variables[8].value,
       // u:         variables[9].value,
-      // size:      variables[10].value,
-      // step:      variables[11].value
+      size: variables[10].value,
+      step: parse_step_key(variables[11])
     };
 
     console.log(`当前变量: ${current_var.variable.name}, 变量列表:`, variables);
