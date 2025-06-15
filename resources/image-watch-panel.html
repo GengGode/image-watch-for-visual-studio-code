@@ -432,6 +432,109 @@
         }
         renderThumbs();
     </script>
+
+    <!-- 在 <body> 末尾添加右键菜单 DOM -->
+    <ul id="customMenu" class="custom-menu" style="display:none;position:absolute;z-index:10000;">
+        <li data-action="zoomToFit">Zoom to Fit</li>
+        <li data-action="zoomToOriginal">Zoom to Original Size</li>
+        <li data-action="linkViews" class="checked">Link Views</li>
+        <li class="separator"></li>
+        <li data-action="autoMaxContrast" class="checked">Auto Maximize Contrast</li>
+        <li data-action="pseudoColor" class="checked">1-Channel Pseudo Color</li>
+        <li data-action="ignoreAlpha" class="checked">4-Channel Ignore Alpha</li>
+        <li class="separator"></li>
+        <li data-action="hexDisplay" class="checked">Hexadecimal Display</li>
+        <li class="separator"></li>
+        <li data-action="copyPixel">Copy Pixel Address</li>
+    </ul>
+
+    <style>
+        .custom-menu {
+            min-width: 220px;
+            background: #232323;
+            border-radius: 6px;
+            box-shadow: 0 2px 16px #000a;
+            padding: 6px 0;
+            margin: 0;
+            list-style: none;
+            font-size: 15px;
+            color: #ccc;
+            border: 1px solid #333;
+        }
+
+        .custom-menu li {
+            padding: 6px 32px 6px 32px;
+            cursor: pointer;
+            position: relative;
+            user-select: none;
+            transition: background 0.15s;
+        }
+
+        .custom-menu li:hover {
+            background: #2a2d2e;
+            color: #fff;
+        }
+
+        .custom-menu li.checked::before {
+            content: "✔";
+            position: absolute;
+            left: 12px;
+            color: #4fc3f7;
+            font-size: 13px;
+        }
+
+        .custom-menu .separator {
+            height: 1px;
+            background: #333;
+            margin: 4px 0;
+            padding: 0;
+            pointer-events: none;
+        }
+    </style>
+
+    <script>
+        const menu = document.getElementById('customMenu');
+        document.addEventListener('contextmenu', function (e) {
+            // 只在 mainView 区域弹出菜单
+            const mainView = document.getElementById('mainView');
+            if (mainView.contains(e.target)) {
+                e.preventDefault();
+                menu.style.display = 'block';
+                menu.style.left = e.clientX + 'px';
+                menu.style.top = e.clientY + 'px';
+            } else {
+                menu.style.display = 'none';
+            }
+        });
+        document.addEventListener('click', function () {
+            menu.style.display = 'none';
+        });
+        menu.addEventListener('click', function (e) {
+            if (e.target.dataset.action) {
+                // 处理菜单点击
+                switch (e.target.dataset.action) {
+                    case 'zoomToFit':
+                        // TODO: 实现 Zoom to Fit
+                        break;
+                    case 'zoomToOriginal':
+                        // TODO: 实现 Zoom to Original Size
+                        break;
+                    case 'linkViews':
+                    case 'autoMaxContrast':
+                    case 'pseudoColor':
+                    case 'ignoreAlpha':
+                    case 'hexDisplay':
+                        // 切换勾选状态
+                        e.target.classList.toggle('checked');
+                        break;
+                    case 'copyPixel':
+                        // TODO: 实现 Copy Pixel Address
+                        break;
+                }
+                menu.style.display = 'none';
+            }
+        });
+    </script>
 </body>
 
 </html>
