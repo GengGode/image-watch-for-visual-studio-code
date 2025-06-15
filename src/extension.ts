@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { ImageWatchWebviewViewProvider } from './image-watch-webview-view';
-import { debug } from 'console';
+// import { debug } from 'console';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Congratulations, your extension "image-watch-for-visual-studio-code" is now active!');

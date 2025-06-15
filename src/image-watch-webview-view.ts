@@ -31,6 +31,8 @@ export class ImageWatchWebviewViewProvider implements vscode.WebviewViewProvider
         webviewView.webview.onDidReceiveMessage(message => {
             if (message.command === 'refresh') {
                 // 处理刷新等操作
+            } else if (message.command === 'hide_variables') {
+                // 隐藏变量操作
             }
         });
 
@@ -46,6 +48,8 @@ export class ImageWatchWebviewViewProvider implements vscode.WebviewViewProvider
             let html = fs.readFileSync(path.join(this.context.extensionPath, 'resources', 'image-watch-panel.html'), 'utf-8');
             const opencvUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'opencv.js'));
             html = html.replace('<!-- opencv.js -->', opencvUri.toString());
+            const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'image-watch.css'));
+            html = html.replace('<!-- image-watch.css -->', cssUri.toString());
             return html;
         } catch (err) {
             return `<html><body><h2>无法加载 image-watch-panel.html</h2><pre>${err}</pre></body></html>`;
