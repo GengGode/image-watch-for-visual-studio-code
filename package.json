@@ -3,9 +3,20 @@
   "displayName": "适用于 Visual Studio Code 的 Image Watch",
   "description": "Provides a watch window for visualizing in-memory images (bitmaps) when debugging native C++ code for Visual Studio Code",
   "version": "0.0.1",
+  "icon": "logo.png",
   "engines": {
     "vscode": "^1.100.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GengGode/image-watch-for-visual-studio-code.git"
+  },
+  "homepage": "https://github.com/GengGode/image-watch-for-visual-studio-code/blob/master/README.md",
+  "keywords": [
+    "image watch",
+    "opencv",
+    "c++"
+  ],
   "categories": [
     "Other"
   ],

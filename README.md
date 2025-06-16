@@ -8,7 +8,8 @@ Image Watch 是一个 Visual Studio Code 调试器"图像监视"窗口，用于�
 
 内置了对 OpenCV 图像类型（cv::Mat）的支持
 
-![OpenCV Image Support](images/image0.png)
+![image0](images/image0.png)
+![image1](images/image1.png)
 
 ## Known Issues
 
