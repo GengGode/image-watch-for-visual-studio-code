@@ -377,14 +377,38 @@
                 const div = document.createElement('div');
                 div.className = 'thumb';
                 div.innerHTML = `
-            <img src = "${var_image.thumbnail}" alt = "${var_image.name}">
-                <div class="info" >
-                    <div class="name">${var_image.name}</div>
-                    <div class="size">${var_image.width} x ${var_image.height}</div>
-                    <div class="memory">${var_image.memory} bytes</div>
-                            </div>
-                                `;
-                div.onclick = () => select_image_from_index(idx);
+            <img src="${var_image.thumbnail}" alt="${var_image.name}">
+            <div class="info">
+                <div class="name">${var_image.name}</div>
+                <div class="size">${var_image.width} x ${var_image.height}</div>
+                <div class="memory">${var_image.memory} bytes</div>
+            </div>
+            <button class="delete-btn" title="删除">×</button>
+        `;
+                div.onclick = (e) => {
+                    // 避免点击删除按钮时触发选中
+                    if (e.target.classList.contains('delete-btn')) return;
+                    select_image_from_index(idx);
+                };
+                // 删除按钮事件
+                div.querySelector('.delete-btn').onclick = (e) => {
+                    e.stopPropagation();
+                    // 释放 Mat 内存
+                    if (pool[idx].unsafe_mat) {
+                        pool[idx].unsafe_mat.delete();
+                        pool[idx].unsafe_mat = null;
+                    }
+                    pool.splice(idx, 1);
+                    update_variables_list();
+                    // 如果删除的是当前选中，重置显示
+                    if (state.current_id === var_image.id) {
+                        state.current_id = null;
+                        const canvas = document.getElementById('mainCanvas');
+                        const placeholder = document.getElementById('placeholder');
+                        canvas.style.display = 'none';
+                        if (placeholder) placeholder.style.display = '';
+                    }
+                };
                 varList.appendChild(div);
             });
         }
@@ -446,7 +470,25 @@
 
         update_variables_list();
     </script>
+    <style>
+        .delete-btn {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            background: transparent;
+            border: none;
+            color: #f55;
+            font-size: 18px;
+            cursor: pointer;
+            z-index: 2;
+            padding: 0 6px;
+            line-height: 1;
+        }
 
+        .thumb {
+            position: relative;
+        }
+    </style>
     <!-- 在 <body> 末尾添加右键菜单 DOM -->
     <ul id="customMenu" class="custom-menu">
         <li data-action="zoomToFit">缩放到适合</li>
