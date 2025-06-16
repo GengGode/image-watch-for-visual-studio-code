@@ -124,6 +124,11 @@ body {
     height: 100%;
 }
 
+canvas {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+}
+
 /* 用于文本居中的占位符样式 */
 .placeholder {
     color: #888;
