@@ -7,6 +7,8 @@
   "engines": {
     "vscode": "^1.100.0"
   },
+  "publisher": "Yu SuiXian",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/GengGode/image-watch-for-visual-studio-code.git"

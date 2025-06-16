@@ -75,7 +75,40 @@
             state.cvInstance.resize(mat, thumbnail, thumbnail_size, 0, 0, state.cvInstance.INTER_LINEAR);
             return thumbnail;
         }
+        function array_from_memory(memory, type) {
+            // type: OpenCV mat type (如 CV_8UC1, CV_16UC1, CV_32FC1 等)
+            // memory: Uint8Array
+            // 支持常见单通道和多通道类型
+            const CV_8U = 0;
+            const CV_8S = 1;
+            const CV_16U = 2;
+            const CV_16S = 3;
+            const CV_32S = 4;
+            const CV_32F = 5;
+            const CV_64F = 6;
 
+            const depth = type & 7; // 低3位
+            // 通道数 = ((type >> 3) & 63) + 1
+            // 这里只处理内存视图，通道数由 matFromArray 负责
+
+            switch (depth) {
+                case CV_8U:
+                case CV_8S:
+                    return memory; // Uint8Array 或 Int8Array，通常调试只会传 Uint8Array
+                case CV_16U:
+                    return new Uint16Array(memory.buffer, memory.byteOffset, memory.byteLength / 2);
+                case CV_16S:
+                    return new Int16Array(memory.buffer, memory.byteOffset, memory.byteLength / 2);
+                case CV_32S:
+                    return new Int32Array(memory.buffer, memory.byteOffset, memory.byteLength / 4);
+                case CV_32F:
+                    return new Float32Array(memory.buffer, memory.byteOffset, memory.byteLength / 4);
+                case CV_64F:
+                    return new Float64Array(memory.buffer, memory.byteOffset, memory.byteLength / 8);
+                default:
+                    throw new Error('Unsupported OpenCV mat depth: ' + depth);
+            }
+        }
         function var_from_message(data) {
             // 处理变量数据
             const { mat, variable_name, memory } = data;
@@ -91,7 +124,9 @@
                 console.error('OpenCV.js 尚未加载完成');
                 return;
             }
-            console.log('mat.type:', mat_type, typeof mat.flags);
+            console.log('mat.type:', mat_type, typeof mat.flags, memory.length, 'mat_is_submat:', mat_is_submat, 'mat_is_continuous:', mat_is_continuous);
+
+            let array = array_from_memory(memory, mat_type);
 
             let image = null;
             // 处理 Mat 引用其他 Mat 的部分区域的情况
@@ -110,7 +145,7 @@
                 console.log('Mat position:', pos);
                 // 创建一个新的连续 Mat
                 const ref_mat = new state.cvInstance.matFromArray(
-                    ref_rows, ref_cols, mat_type, memory
+                    ref_rows, ref_cols, mat_type, array
                 );
                 console.log('Creating cv.Mat from memory:', ref_mat);
                 const roi = new state.cvInstance.Rect(pos[1], pos[0], mat.cols, mat.rows);
@@ -126,7 +161,7 @@
             else {
                 console.log('Mat is continuous, using it directly');
                 // 如果是连续的 Mat，直接使用
-                image = new state.cvInstance.matFromArray(mat.rows, mat.cols, mat_type, memory);
+                image = new state.cvInstance.matFromArray(mat.rows, mat.cols, mat_type, array);
             }
             console.log('Creating cv.Mat from memory:', image);
 
@@ -134,33 +169,6 @@
             let var_image = Object.assign({}, var_image_t); // 创建一个新的图像变量对象
             var_image.unsafe_mat = image.clone();
             console.log('Original Mat type:', image.type(), 'Size:', image.size(), 'Channels:', image.channels());
-            // 统一转为 CV_8UC4
-            // 先处理浮点数类型
-            if (image.type() === state.cvInstance.CV_32FC1 || image.type() === state.cvInstance.CV_32FC3) {
-                console.log('Converting CV_32F to CV_8UC4');
-                image.convertTo(image, state.cvInstance.CV_8UC4, 255.0);
-            } else if (image.type() === state.cvInstance.CV_8UC1) {
-                console.log('Converting CV_8UC1 to CV_8UC4');
-                let temp = new state.cvInstance.Mat();
-                state.cvInstance.cvtColor(image, temp, state.cvInstance.COLOR_GRAY2RGBA);
-                image.delete();
-                image = temp;
-            } else if (image.type() === state.cvInstance.CV_8UC3) {
-                console.log('Converting CV_8UC3 to CV_8UC4');
-                let temp = new state.cvInstance.Mat();
-                state.cvInstance.cvtColor(image, temp, state.cvInstance.COLOR_RGB2RGBA);
-                image.delete();
-                image = temp;
-            } else if (image.type() !== state.cvInstance.CV_8UC4) {
-                console.error('Unsupported mat type:', image.type());
-                return;
-            }
-            // 创建缩略图
-            var_image.thumbnail = base64_from_mat(thumbnail_from_mat(image));
-            // 创建图像数据
-
-            // 将 Mat 转换为 ImageData
-            var_image.image = image_from_mat(image);
             // 设置图像变量的宽高
             var_image.width = image.cols;
             var_image.height = image.rows;
@@ -181,13 +189,14 @@
                 return;
             }
             // 这里可以添加图像处理逻辑
-            console.log('Processing image:', var_image.name);
+            console.log('Processing image:', var_image);
             // 例如，转换为灰度图像
+            console.log('Processing Mat type:', var_image.unsafe_mat.type(), 'Size:', var_image.unsafe_mat.size(), 'Channels:', var_image.unsafe_mat.channels());
             const ret_mat = var_image.unsafe_mat.clone();
             // 是否需要归一化
             if (is_normalization_minmax) {
                 // 最大化归一化
-                state.cvInstance.normalize(ret_mat, ret_mat, 0, 255, state.cvInstance.NORM_MINMAX);
+                state.cvInstance.normalize(ret_mat, ret_mat, 0, 255, state.cvInstance.NORM_MINMAX, state.cvInstance.CV_8U);
             }
             // 如果是4通道图像，判断是否忽略Alpha通道
             if (is_ignore_alpha && ret_mat.channels() === 4) {
@@ -199,11 +208,28 @@
             // 如果是1通道图像，直判断是否伪彩色
             if (ret_mat.channels() === 1 && is_pseudo_color) {
                 // 将灰度图像转换为伪彩色图像
+                state.cvInstance.normalize(ret_mat, ret_mat, 0, 255, state.cvInstance.NORM_MINMAX, state.cvInstance.CV_8U);
+                //state.cvInstance.convertScaleAbs(ret_mat, converted_mat);
                 state.cvInstance.applyColorMap(ret_mat, ret_mat, state.cvInstance.COLORMAP_JET);
                 // 再转为RGBA
                 state.cvInstance.cvtColor(ret_mat, ret_mat, state.cvInstance.COLOR_RGB2RGBA);
             }
-
+            if (ret_mat.channels() === 1) {
+                state.cvInstance.cvtColor(ret_mat, ret_mat, state.cvInstance.COLOR_GRAY2RGBA);
+            } else if (ret_mat.channels() === 3) {
+                state.cvInstance.cvtColor(ret_mat, ret_mat, state.cvInstance.COLOR_RGB2BGRA);
+            } else if (ret_mat.channels() !== 4) {
+                console.warn('Unsupported image channels:', ret_mat.channels());
+                state.cvInstance.cvtColor(ret_mat, ret_mat, state.cvInstance.COLOR_RGBA2BGRA);
+            }
+            if (ret_mat.type() !== state.cvInstance.CV_8UC4) {
+                // 16位或32位64位图像转换为8位
+                //let converted_mat = new state.cvInstance.Mat();
+                state.cvInstance.convertScaleAbs(ret_mat, ret_mat);
+                //ret_mat.delete(); // 释放原 Mat 内存
+                //ret_mat = converted_mat; // 使用转换后的 Mat
+            }
+            console.log('Processed Mat type:', ret_mat.type(), 'Size:', ret_mat.size(), 'Channels:', ret_mat.channels());
             // 更新图像变量
             var_image.image = image_from_mat(ret_mat);
             var_image.processed = true; // 标记为已处理
@@ -274,15 +300,14 @@
             console.log('Image variable created:', var_image);
             // 根据add_variable命令的from字段，添加到对应的变量列表
             if (var_image.from === 'local') {
-                state.current_id = var_image.id; // 更新当前选中的变量ID
                 state.variables.local.push(var_image);
             } else if (var_image.from === 'watch') {
-                state.current_id = var_image.id; // 更新当前选中的变量ID
                 state.variables.watch.push(var_image);
             } else {
                 console.error('Unknown variable source:', var_image.from);
                 return;
             }
+            console.log('Process options:', state.image_processing_options);
             process_image(var_image, state.image_processing_options.is_normalization_minmax,
                 state.image_processing_options.is_pseudo_color,
                 state.image_processing_options.is_ignore_alpha);
@@ -386,6 +411,7 @@
                 console.error('Invalid image variable:', var_image);
                 return;
             }
+            state.current_id = var_image.id; // 更新当前选中的变量ID
             console.log('Selected image variable:', var_image);
             // 用 canvas 显示大图
             const canvas = document.getElementById('mainCanvas');
@@ -519,9 +545,11 @@
                         if (state.current_id) {
                             const var_image = state.variables[state.current_mode].find(img => img.id === state.current_id);
                             if (var_image) {
+                                console.log('Process options:', state.image_processing_options);
                                 process_image(var_image, state.image_processing_options.is_normalization_minmax,
                                     state.image_processing_options.is_pseudo_color,
                                     state.image_processing_options.is_ignore_alpha);
+                                update_variables_list(); // 渲染缩略图列表
                                 select_image_from_id(var_image.id); // 重新选择当前图像以更新显示
                             }
                         }
@@ -534,9 +562,11 @@
                         if (state.current_id) {
                             const var_image = state.variables[state.current_mode].find(img => img.id === state.current_id);
                             if (var_image) {
+                                console.log('Process options:', state.image_processing_options);
                                 process_image(var_image, state.image_processing_options.is_normalization_minmax,
                                     state.image_processing_options.is_pseudo_color,
                                     state.image_processing_options.is_ignore_alpha);
+                                update_variables_list(); // 渲染缩略图列表
                                 select_image_from_id(var_image.id); // 重新选择当前图像以更新显示
                             }
                         }
@@ -549,9 +579,11 @@
                         if (state.current_id) {
                             const var_image = state.variables[state.current_mode].find(img => img.id === state.current_id);
                             if (var_image) {
+                                console.log('Process options:', state.image_processing_options);
                                 process_image(var_image, state.image_processing_options.is_normalization_minmax,
                                     state.image_processing_options.is_pseudo_color,
                                     state.image_processing_options.is_ignore_alpha);
+                                update_variables_list(); // 渲染缩略图列表
                                 select_image_from_id(var_image.id); // 重新选择当前图像以更新显示
                             }
                         }
