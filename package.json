@@ -2,7 +2,7 @@
   "name": "image-watch-for-visual-studio-code",
   "displayName": "适用于 Visual Studio Code 的 Image Watch",
   "description": "Provides a watch window for visualizing in-memory images (bitmaps) when debugging native C++ code for Visual Studio Code",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "icon": "logo.png",
   "engines": {
     "vscode": "^1.84.0"
