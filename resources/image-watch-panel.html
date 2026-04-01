@@ -973,23 +973,108 @@
     //  Message Handler (from extension)
     // =========================================================================
 
+    function clearVariableList(pool) {
+        pool.forEach(v => { if (v.unsafe_mat) { try { v.unsafe_mat.delete(); } catch (_) {} } });
+        pool.length = 0;
+    }
+
     window.addEventListener('message', event => {
-        if (!event.data || event.data.command !== 'add_variable') return;
+        if (!event.data || !event.data.command) return;
+        const cmd = event.data.command;
 
-        const v = var_from_message(event.data);
-        if (!v) return;
+        if (cmd === 'add_variable') {
+            const v = var_from_message(event.data);
+            if (!v) return;
 
-        if (v.from === 'local') {
-            state.variables.local.push(v);
-        } else {
-            state.variables.watch.push(v);
+            if (event.data.from === 'local') {
+                v.from = 'local';
+                state.variables.local.push(v);
+                switch_local();
+            } else {
+                v.from = 'watch';
+                state.variables.watch.push(v);
+                switch_watch();
+            }
+
+            const o = state.image_processing_options;
+            process_image(v, o.is_normalization_minmax, o.is_pseudo_color, o.is_ignore_alpha);
+            update_variables_list();
+            select_image_from_id(v.id);
+            return;
         }
 
-        const o = state.image_processing_options;
-        process_image(v, o.is_normalization_minmax, o.is_pseudo_color, o.is_ignore_alpha);
-        switch_watch();
-        update_variables_list();
-        select_image_from_id(v.id);
+        if (cmd === 'set_local_variables') {
+            const items = event.data.variables;
+            if (!Array.isArray(items)) return;
+
+            const prevMode = state.current_mode;
+            const prevSelected = state.variables.local.find(v => v.id === state.current_id);
+            const prevName = prevSelected ? prevSelected.name : null;
+
+            clearVariableList(state.variables.local);
+
+            let firstId = null;
+            items.forEach(item => {
+                const v = var_from_message(item);
+                if (!v) return;
+                v.from = 'local';
+                state.variables.local.push(v);
+                const o = state.image_processing_options;
+                process_image(v, o.is_normalization_minmax, o.is_pseudo_color, o.is_ignore_alpha);
+                if (!firstId) firstId = v.id;
+            });
+
+            if (prevMode === 'local') {
+                switch_local();
+                const match = prevName
+                    ? state.variables.local.find(v => v.name === prevName)
+                    : null;
+                if (match) {
+                    select_image_from_id(match.id);
+                } else if (firstId) {
+                    select_image_from_id(firstId);
+                }
+            } else {
+                update_variables_list();
+            }
+            return;
+        }
+
+        if (cmd === 'update_variable') {
+            const pool = state.variables.watch;
+            const idx = pool.findIndex(v => v.name === event.data.variable_name);
+            if (idx === -1) return;
+
+            const old = pool[idx];
+            const wasSelected = state.current_id === old.id;
+
+            const v = var_from_message(event.data);
+            if (!v) return;
+            v.from = 'watch';
+            v.id = old.id;
+
+            if (old.unsafe_mat) { try { old.unsafe_mat.delete(); } catch (_) {} }
+            pool[idx] = v;
+
+            const o = state.image_processing_options;
+            process_image(v, o.is_normalization_minmax, o.is_pseudo_color, o.is_ignore_alpha);
+            update_variables_list();
+
+            if (wasSelected) {
+                select_image_from_id(v.id);
+            }
+            return;
+        }
+
+        if (cmd === 'clear_all') {
+            clearVariableList(state.variables.local);
+            clearVariableList(state.variables.watch);
+            state.current_id = null;
+            state.lastViewedId = null;
+            update_variables_list();
+            viewer.clearImage();
+            return;
+        }
     });
 
     // =========================================================================
