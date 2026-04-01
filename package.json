@@ -66,11 +66,63 @@
     "menus": {
       "debug/variables/context": [
         {
-          "when": "debugStartLanguage=='cuda-cpp' || debugStartLanguage=='cpp'",
+          "when": "debugStartLanguage=='cuda-cpp' || debugStartLanguage=='cpp' || debugStartLanguage=='c'",
           "command": "image-watch-for-visual-studio-code.add_to_watch_image",
           "group": "3_compare"
         }
       ]
+    },
+    "configuration": {
+      "title": "Image Watch",
+      "properties": {
+        "imageWatch.customFormats": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "自定义图像结构体格式描述符。每个条目描述一种 C/C++ 结构体如何映射为可显示的图像。内置已支持 `cv::Mat`，无需重复配置。\n\n详见 [README](https://github.com/GengGode/image-watch-for-visual-studio-code#custom-formats) 获取完整文档和示例。",
+          "items": {
+            "type": "object",
+            "required": ["name", "typePattern", "members", "mapping", "memorySize"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "格式名称（仅用于日志和展示）"
+              },
+              "typePattern": {
+                "type": "string",
+                "description": "正则表达式，匹配调试器变量视图中显示的类型字符串"
+              },
+              "members": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "结构体成员名列表（顺序必须与调试器展开的顺序一致）"
+              },
+              "mapping": {
+                "type": "object",
+                "required": ["rows", "cols", "channels", "depth", "data", "step"],
+                "description": "字段映射规则：如何从结构体成员中提取图像的行、列、通道、深度、数据指针和步长",
+                "properties": {
+                  "rows": { "type": "string", "description": "行数（高度）对应的成员名" },
+                  "cols": { "type": "string", "description": "列数（宽度）对应的成员名" },
+                  "channels": {
+                    "description": "通道数：直接成员名(string)，或固定值 {\"value\": n}，或从 flags 位域提取 {\"fromFlags\": \"flags\", \"shift\": 3, \"mask\": 63, \"offset\": 1}"
+                  },
+                  "depth": {
+                    "description": "像素深度：直接成员名(string, 值为 OpenCV depth 0-6)，或字节大小模式 {\"field\": \"depth\", \"interpret\": \"byteSize\"}，或自定义映射 {\"field\": \"fmt\", \"map\": {\"1\": 0, \"2\": 5}}，或固定值 {\"value\": 0}"
+                  },
+                  "data": { "type": "string", "description": "数据指针对应的成员名" },
+                  "step": {
+                    "description": "行步长(字节)：直接成员名(string)，或 OpenCV step 对象 {\"field\": \"step\", \"interpret\": \"opencvStep\"}"
+                  }
+                }
+              },
+              "memorySize": {
+                "type": "string",
+                "description": "内存大小的算术表达式，可引用 rows / cols / channels / step / datastart / dataend 等变量，如 \"rows * step\" 或 \"dataend - datastart\""
+              }
+            }
+          }
+        }
+      }
     }
   },
   "scripts": {

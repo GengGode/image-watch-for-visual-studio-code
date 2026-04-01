@@ -41,7 +41,12 @@ export interface ChannelMappingFixed {
     value: number;
 }
 
-export type ChannelMapping = string | ChannelMappingFromFlags | ChannelMappingFixed;
+export interface ChannelMappingCustom {
+    field: string;
+    map: Record<string, number>;
+}
+
+export type ChannelMapping = string | ChannelMappingFromFlags | ChannelMappingFixed | ChannelMappingCustom;
 
 export interface StepMappingOpenCV {
     field: string;
@@ -267,6 +272,13 @@ function resolveChannels(mapping: ChannelMapping, variables: any[]): number {
         const flagsVar = findMember(variables, fm.fromFlags);
         if (!flagsVar) { return 1; }
         return ((parseIntValue(flagsVar) >> fm.shift) & fm.mask) + fm.offset;
+    }
+    if ('map' in mapping) {
+        const cm = mapping as ChannelMappingCustom;
+        const m = findMember(variables, cm.field);
+        if (!m) { return 1; }
+        const key = String(parseIntValue(m));
+        return cm.map[key] ?? 1;
     }
     return 1;
 }

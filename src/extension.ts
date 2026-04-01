@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { ImageWatchWebviewViewProvider } from './image-watch-webview-view';
-import { isCvMatStructure, parseCvMat, readMatMemory } from './mat-utils';
+import { tryParseAsImage, readMatMemory } from './mat-utils';
 import { createTrackerFactory, addWatchedVariable, clearWatchedVariables } from './debug-tracker';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -59,11 +59,11 @@ export function activate(context: vscode.ExtensionContext) {
                 return vscode.window.showErrorMessage('获取变量失败');
             }
 
-            if (!isCvMatStructure(variables)) {
-                return vscode.window.showErrorMessage('变量数据格式不正确, 可能不是 cv::Mat 类型');
+            const mat = tryParseAsImage(variables);
+            if (!mat) {
+                return vscode.window.showErrorMessage('变量数据格式不匹配任何已知的图像类型');
             }
 
-            const mat = parseCvMat(variables);
             const memory = await readMatMemory(session, mat);
             if (!memory) {
                 return vscode.window.showErrorMessage('无法读取内存数据，请检查调试会话是否正常');

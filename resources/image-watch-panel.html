@@ -159,12 +159,17 @@
     //  OpenCV & Image Processing (preserved logic)
     // =========================================================================
 
+    const pendingMessages = [];
+
     function init_opencv() {
         if (!window.cv || typeof window.cv.then !== 'function')
             throw new Error('OpenCV.js is not loaded.');
         window.cv.then((cv) => {
             state.cvReady = true;
             state.cvInstance = cv;
+            while (pendingMessages.length > 0) {
+                handleMessage(pendingMessages.shift());
+            }
         });
     }
 
@@ -208,25 +213,33 @@
 
         if (!state.cvReady) { console.error('OpenCV.js 尚未加载'); return; }
 
-        let array = array_from_memory(memory, mat_type);
         let image = null;
 
-        if (!mat_is_submat) {
-            const use_addr = mat.data.addr;
-            const addr = mat.datastart.addr;
-            const size = mat.dataend.addr - addr;
-            const skip = use_addr - addr;
-            const ref_cols = mat.step[0];
-            const ref_rows = size / ref_cols;
-            let pos = [Math.floor(skip / ref_cols), Math.floor(skip % ref_cols)];
-            const ref_mat = new state.cvInstance.matFromArray(ref_rows, ref_cols, mat_type, array);
-            const roi = new state.cvInstance.Rect(pos[1], pos[0], mat.cols, mat.rows);
-            let roi_mat = ref_mat.roi(roi);
-            image = roi_mat.clone();
-            ref_mat.delete();
-            roi_mat.delete();
+        const depth = mat_type & 7;
+        const channels = ((mat_type >> 3) & 63) + 1;
+        const elemSize1 = [1, 1, 2, 2, 4, 4, 8][depth];
+        const rowBytes = mat.cols * channels * elemSize1;
+        const srcStep = mat.step[0];
+
+        const use_addr = mat.data.addr;
+        const addr = mat.datastart.addr;
+        const skip = use_addr - addr;
+
+        if (skip === 0 && srcStep === rowBytes) {
+            const array = array_from_memory(memory, mat_type);
+            const expected = mat.rows * mat.cols * channels;
+            const safe = array.length > expected ? array.subarray(0, expected) : array;
+            image = new state.cvInstance.matFromArray(mat.rows, mat.cols, mat_type, safe);
         } else {
-            image = new state.cvInstance.matFromArray(mat.rows, mat.cols, mat_type, array);
+            image = state.cvInstance.Mat.zeros(mat.rows, mat.cols, mat_type);
+            for (let row = 0; row < mat.rows; row++) {
+                const srcOff = skip + row * srcStep;
+                const dstOff = row * rowBytes;
+                image.data.set(
+                    memory.subarray(srcOff, srcOff + rowBytes),
+                    dstOff
+                );
+            }
         }
 
         let v = Object.assign({}, var_image_t);
@@ -980,13 +993,21 @@
 
     window.addEventListener('message', event => {
         if (!event.data || !event.data.command) return;
-        const cmd = event.data.command;
+        if (!state.cvReady) {
+            pendingMessages.push(event.data);
+            return;
+        }
+        handleMessage(event.data);
+    });
+
+    function handleMessage(data) {
+        const cmd = data.command;
 
         if (cmd === 'add_variable') {
-            const v = var_from_message(event.data);
+            const v = var_from_message(data);
             if (!v) return;
 
-            if (event.data.from === 'local') {
+            if (data.from === 'local') {
                 v.from = 'local';
                 state.variables.local.push(v);
                 switch_local();
@@ -1004,7 +1025,7 @@
         }
 
         if (cmd === 'set_local_variables') {
-            const items = event.data.variables;
+            const items = data.variables;
             if (!Array.isArray(items)) return;
 
             const prevMode = state.current_mode;
@@ -1042,13 +1063,13 @@
 
         if (cmd === 'update_variable') {
             const pool = state.variables.watch;
-            const idx = pool.findIndex(v => v.name === event.data.variable_name);
+            const idx = pool.findIndex(v => v.name === data.variable_name);
             if (idx === -1) return;
 
             const old = pool[idx];
             const wasSelected = state.current_id === old.id;
 
-            const v = var_from_message(event.data);
+            const v = var_from_message(data);
             if (!v) return;
             v.from = 'watch';
             v.id = old.id;
@@ -1075,7 +1096,7 @@
             viewer.clearImage();
             return;
         }
-    });
+    }
 
     // =========================================================================
     //  Init

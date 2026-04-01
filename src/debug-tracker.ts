@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { ImageWatchWebviewViewProvider } from './image-watch-webview-view';
-import { findCvMatsInScope, MatVariable, tryExpandAsCvMat, readMatMemory } from './mat-utils';
+import { findImagesInScope, MatVariable } from './mat-utils';
 
 let watchedVariableNames: Set<string> = new Set();
 
@@ -70,7 +70,7 @@ class ImageWatchTracker implements vscode.DebugAdapterTracker {
 
         let allLocalMats: MatVariable[];
         try {
-            allLocalMats = await findCvMatsInScope(this.session, localsRef);
+            allLocalMats = await findImagesInScope(this.session, localsRef);
         } catch { return; }
 
         if (this.disposed) { return; }
