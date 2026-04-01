@@ -4,7 +4,6 @@
 <head>
     <link rel="stylesheet" type="text/css" href="<!-- image-watch.css -->" />
     <script src="<!-- opencv.js -->" type="text/javascript"></script>
-    <script src='https://unpkg.com/panzoom@9.4.0/dist/panzoom.min.js'></script>
 </head>
 
 <body>
@@ -14,635 +13,992 @@
                 <button id="btnLocal" class="toggle-btn selected">局部变量</button>
                 <button id="btnWatch" class="toggle-btn">监视</button>
             </div>
-
-            <div class="sidebar" id="varList">
-                <!-- 这里可以动态生成局部变量或监视列表 -->
-            </div>
+            <div class="var-list" id="varList"></div>
         </div>
         <div class="resizer" id="resizer"></div>
         <div class="main" id="mainView">
-            <div class="main" id="currentImage">
-                <!-- 这里显示当前选中的图片 -->
-                <canvas id="mainCanvas" style="max-width: 90%; max-height: 90%;"> </canvas>
+            <div class="viewer-container" id="viewerContainer">
+                <canvas id="mainCanvas"></canvas>
                 <div id="placeholder" class="placeholder">[无选择]</div>
+            </div>
+            <div class="status-bar" id="statusBar">
+                <span id="statusCoords">-</span>
+                <span class="sep">|</span>
+                <span id="statusValue">-</span>
+                <span class="sep">|</span>
+                <span id="statusSize">-</span>
+                <span class="sep">|</span>
+                <span id="statusZoom">-</span>
             </div>
         </div>
     </div>
-    <script>
-        const var_image_t = {
-            from: 'watch',
-            id: null, // 变量ID
-            name: '图像变量',
-            width: 640,
-            height: 480,
-            memory: 307200, // 640 * 480 * 4
-            thumbnail: null, // 缩略图 base64 编码
-            processed: false, // 是否处理过
-            image: null, // 图像数据
-            unsafe_mat: null // 原始 Mat 数据
-        }
 
-        function image_from_mat(mat) {
-            // 将 Mat 转换为 ImageData
-            const image_data = new ImageData(
-                new Uint8ClampedArray(mat.data),
-                mat.cols,
-                mat.rows
-            );
-            return image_data;
-        }
-
-        function base64_from_mat(mat) {
-            // 将 Mat 转换为 ImageData
-            const image_data = new ImageData(
-                new Uint8ClampedArray(mat.data),
-                mat.cols,
-                mat.rows
-            );
-            // 创建一个 canvas 元素
-            const canvas = document.createElement('canvas');
-            canvas.width = mat.cols;
-            canvas.height = mat.rows;
-            const ctx = canvas.getContext('2d');
-            ctx.putImageData(image_data, 0, 0);
-            return canvas.toDataURL('image/png');
-        }
-
-        function thumbnail_from_mat(mat) {
-            // 创建缩略图
-            const thumbnail = new state.cvInstance.Mat();
-            const thumbnail_size = new state.cvInstance.Size(90, 76);
-            state.cvInstance.resize(mat, thumbnail, thumbnail_size, 0, 0, state.cvInstance.INTER_LINEAR);
-            return thumbnail;
-        }
-        function array_from_memory(memory, type) {
-            // type: OpenCV mat type (如 CV_8UC1, CV_16UC1, CV_32FC1 等)
-            // memory: Uint8Array
-            // 支持常见单通道和多通道类型
-            const CV_8U = 0;
-            const CV_8S = 1;
-            const CV_16U = 2;
-            const CV_16S = 3;
-            const CV_32S = 4;
-            const CV_32F = 5;
-            const CV_64F = 6;
-
-            const depth = type & 7; // 低3位
-            // 通道数 = ((type >> 3) & 63) + 1
-            // 这里只处理内存视图，通道数由 matFromArray 负责
-
-            switch (depth) {
-                case CV_8U:
-                case CV_8S:
-                    return memory; // Uint8Array 或 Int8Array，通常调试只会传 Uint8Array
-                case CV_16U:
-                    return new Uint16Array(memory.buffer, memory.byteOffset, memory.byteLength / 2);
-                case CV_16S:
-                    return new Int16Array(memory.buffer, memory.byteOffset, memory.byteLength / 2);
-                case CV_32S:
-                    return new Int32Array(memory.buffer, memory.byteOffset, memory.byteLength / 4);
-                case CV_32F:
-                    return new Float32Array(memory.buffer, memory.byteOffset, memory.byteLength / 4);
-                case CV_64F:
-                    return new Float64Array(memory.buffer, memory.byteOffset, memory.byteLength / 8);
-                default:
-                    throw new Error('Unsupported OpenCV mat depth: ' + depth);
-            }
-        }
-        function var_from_message(data) {
-            // 处理变量数据
-            const { mat, variable_name, memory } = data;
-            console.log('Variable name:', variable_name);
-            console.log('memory:', memory);
-            console.log('mat:', mat);
-            const mat_is_submat = mat.flags & 0x4000; // CV_MAT_SUBMATRIX_FLAG
-            const mat_is_continuous = mat.flags & 0x200; // CV_MAT_CONT_FLAG
-            const mat_type = mat.flags & 0xFFF;
-
-            // 等待 opencv.js 加载完成
-            if (!state.cvReady) {
-                console.error('OpenCV.js 尚未加载完成');
-                return;
-            }
-            console.log('mat.type:', mat_type, typeof mat.flags, memory.length, 'mat_is_submat:', mat_is_submat, 'mat_is_continuous:', mat_is_continuous);
-
-            let array = array_from_memory(memory, mat_type);
-
-            let image = null;
-            // 处理 Mat 引用其他 Mat 的部分区域的情况
-            if (!mat_is_submat) {
-                console.warn('Mat is not continuous, converting to continuous Mat');
-                // 如果不是连续的 Mat，通过 addr.start 和 addr.end 获取连续内存
-                const use_addr = mat.data.addr;
-                const addr = mat.datastart.addr;
-                const size = mat.dataend.addr - addr;
-                const skip = use_addr - addr;
-                const ref_cols = mat.step[0];
-                const ref_rows = size / ref_cols;
-                console.log('Reference rows:', ref_rows, 'Reference cols:', ref_cols);
-                console.log('Mat address:', addr, 'Size:', size, 'Skip:', skip);
-                let pos = [Math.floor(skip / ref_cols), Math.floor(skip % ref_cols)];
-                console.log('Mat position:', pos);
-                // 创建一个新的连续 Mat
-                const ref_mat = new state.cvInstance.matFromArray(
-                    ref_rows, ref_cols, mat_type, array
-                );
-                console.log('Creating cv.Mat from memory:', ref_mat);
-                const roi = new state.cvInstance.Rect(pos[1], pos[0], mat.cols, mat.rows);
-                console.log('Creating ROI:', roi);
-                // 使用 ROI 创建新的 Mat
-                let roi_mat = ref_mat.roi(roi);
-                console.log('New Mat after ROI:', roi_mat);
-                image = roi_mat.clone();
-                // 清理临时 Mat
-                ref_mat.delete();
-                roi_mat.delete();
-            }
-            else {
-                console.log('Mat is continuous, using it directly');
-                // 如果是连续的 Mat，直接使用
-                image = new state.cvInstance.matFromArray(mat.rows, mat.cols, mat_type, array);
-            }
-            console.log('Creating cv.Mat from memory:', image);
-
-            // 设置 unsafe_mat 为原始 Mat 数据
-            let var_image = Object.assign({}, var_image_t); // 创建一个新的图像变量对象
-            var_image.unsafe_mat = image.clone();
-            console.log('Original Mat type:', image.type(), 'Size:', image.size(), 'Channels:', image.channels());
-            // 设置图像变量的宽高
-            var_image.width = image.cols;
-            var_image.height = image.rows;
-            image.delete(); // 释放 Mat 内存
-            // 设置图像变量的其他属性
-            var_image.name = variable_name;
-            var_image.memory = memory.length || image.data.length; // 使用传入的内存大小或 Mat 的数据长度
-
-            var_image.id = variable_name + '_' + Date.now(); // 生成唯一ID
-            // 返回图像数据
-            return var_image;
-        }
-
-        function process_image(var_image, is_normalization_minmax, is_pseudo_color, is_ignore_alpha) {
-            // 处理图像数据
-            if (!var_image || !var_image.unsafe_mat) {
-                console.error('Invalid image variable:', var_image);
-                return;
-            }
-            // 这里可以添加图像处理逻辑
-            console.log('Processing image:', var_image);
-            // 例如，转换为灰度图像
-            console.log('Processing Mat type:', var_image.unsafe_mat.type(), 'Size:', var_image.unsafe_mat.size(), 'Channels:', var_image.unsafe_mat.channels());
-            const ret_mat = var_image.unsafe_mat.clone();
-            // 是否需要归一化
-            if (is_normalization_minmax) {
-                // 最大化归一化
-                state.cvInstance.normalize(ret_mat, ret_mat, 0, 255, state.cvInstance.NORM_MINMAX, state.cvInstance.CV_8U);
-            }
-            // 如果是4通道图像，判断是否忽略Alpha通道
-            if (is_ignore_alpha && ret_mat.channels() === 4) {
-                // 将4通道图像转换为3通道
-                state.cvInstance.cvtColor(ret_mat, ret_mat, state.cvInstance.COLOR_RGBA2RGB);
-                // 再转为RGBA
-                state.cvInstance.cvtColor(ret_mat, ret_mat, state.cvInstance.COLOR_RGB2RGBA);
-            }
-            // 如果是1通道图像，直判断是否伪彩色
-            if (ret_mat.channels() === 1 && is_pseudo_color) {
-                // 将灰度图像转换为伪彩色图像
-                state.cvInstance.normalize(ret_mat, ret_mat, 0, 255, state.cvInstance.NORM_MINMAX, state.cvInstance.CV_8U);
-                //state.cvInstance.convertScaleAbs(ret_mat, converted_mat);
-                state.cvInstance.applyColorMap(ret_mat, ret_mat, state.cvInstance.COLORMAP_JET);
-                // 再转为RGBA
-                state.cvInstance.cvtColor(ret_mat, ret_mat, state.cvInstance.COLOR_RGB2RGBA);
-            }
-            if (ret_mat.channels() === 1) {
-                state.cvInstance.cvtColor(ret_mat, ret_mat, state.cvInstance.COLOR_GRAY2RGBA);
-            } else if (ret_mat.channels() === 3) {
-                state.cvInstance.cvtColor(ret_mat, ret_mat, state.cvInstance.COLOR_RGB2BGRA);
-            } else if (ret_mat.channels() !== 4) {
-                console.warn('Unsupported image channels:', ret_mat.channels());
-                state.cvInstance.cvtColor(ret_mat, ret_mat, state.cvInstance.COLOR_RGBA2BGRA);
-            }
-            if (ret_mat.type() !== state.cvInstance.CV_8UC4) {
-                // 16位或32位64位图像转换为8位
-                //let converted_mat = new state.cvInstance.Mat();
-                state.cvInstance.convertScaleAbs(ret_mat, ret_mat);
-                //ret_mat.delete(); // 释放原 Mat 内存
-                //ret_mat = converted_mat; // 使用转换后的 Mat
-            }
-            console.log('Processed Mat type:', ret_mat.type(), 'Size:', ret_mat.size(), 'Channels:', ret_mat.channels());
-            // 更新图像变量
-            var_image.image = image_from_mat(ret_mat);
-            var_image.processed = true; // 标记为已处理
-            // 更新缩略图
-            var_image.thumbnail = base64_from_mat(thumbnail_from_mat(ret_mat));
-            ret_mat.delete(); // 释放 Mat 内存
-            // 更新变量列表
-            const pool = state.variables[state.current_mode];
-            const idx = pool.findIndex(img => img.id === var_image.id);
-            if (idx !== -1) {
-                pool[idx] = var_image; // 更新变量
-            } else {
-                console.error('Image variable not found in current mode:', var_image.id);
-            }
-        }
-
-        function init_opecv() {
-            if (!window.cv || typeof window.cv.then !== 'function')
-                throw new Error('OpenCV.js is not loaded or not available as a promise.');
-            console.log('Initializing OpenCV.js...');
-            window.cv.then((cv) => {
-                state.cvReady = true;
-                state.cvInstance = cv;
-            });
-        }
-    </script>
-    <script>
-        const state = {
-            cvReady: false,
-            cvInstance: null,
-            variables: {
-                local: [],
-                watch: []
-            },
-            current_mode: 'local', // 'local' or 'watch'
-            current_id: null,
-            panzoom_instance: null, // 用于图像缩放和平移
-            image_processing_options: {
-                is_normalization_minmax: true, // 是否进行最大化归一化
-                is_pseudo_color: false, // 是否使用伪彩色
-                is_ignore_alpha: true // 是否忽略Alpha通道
-            }
-        };
-
-        // 右键菜单
-        const elements = {
-            mainView: document.getElementById('mainView'),
-            customMenu: document.getElementById('customMenu'),
-        };
-        init_opecv();
-
-        // 监听器函数
-        window.addEventListener('message', event => {
-            console.log('Received message:', event);
-            if (!event.data || !event.data.command) {
-                console.error('Invalid message format:', event);
-                return;
-            }
-            if (event.data.command != 'add_variable') {
-                console.error('Unknown message type:', event.data.type);
-                return;
-            }
-            const var_image = var_from_message(event.data);
-            if (!var_image) {
-                console.error('Failed to create image variable from message:', event.data);
-                return;
-            }
-            console.log('Image variable created:', var_image);
-            // 根据add_variable命令的from字段，添加到对应的变量列表
-            if (var_image.from === 'local') {
-                state.variables.local.push(var_image);
-            } else if (var_image.from === 'watch') {
-                state.variables.watch.push(var_image);
-            } else {
-                console.error('Unknown variable source:', var_image.from);
-                return;
-            }
-            console.log('Process options:', state.image_processing_options);
-            process_image(var_image, state.image_processing_options.is_normalization_minmax,
-                state.image_processing_options.is_pseudo_color,
-                state.image_processing_options.is_ignore_alpha);
-            switch_watch();
-            update_variables_list(); // 渲染缩略图列表
-            select_image_from_id(var_image.id);
-        });
-
-        const resizer = document.getElementById('resizer');
-        const sidebar = document.getElementById('thumbList');
-        let isResizing = false;
-
-        resizer.addEventListener('mousedown', function (e) {
-            isResizing = true;
-            document.body.style.cursor = 'ew-resize';
-        });
-
-        document.addEventListener('mousemove', function (e) {
-            if (!isResizing) return;
-            const min = 100, max = window.innerWidth - 100;
-            let newWidth = Math.min(Math.max(e.clientX, min), max);
-            sidebar.style.width = newWidth + 'px';
-        });
-
-        document.addEventListener('mouseup', function () {
-            if (isResizing) {
-                isResizing = false;
-                document.body.style.cursor = '';
-            }
-        });
-
-        // 互斥按钮逻辑
-        const btnLocal = document.getElementById('btnLocal');
-        const btnWatch = document.getElementById('btnWatch');
-
-        function switch_local() {
-            btnLocal.classList.add('selected');
-            btnWatch.classList.remove('selected');
-            // TODO: 切换到局部变量数据
-            state.current_mode = 'local';
-            update_variables_list();
-        }
-        function switch_watch() {
-            btnWatch.classList.add('selected');
-            btnLocal.classList.remove('selected');
-            state.current_mode = 'watch';
-            update_variables_list();
-        }
-        btnLocal.onclick = switch_local;
-        btnWatch.onclick = switch_watch;
-
-        const varList = document.getElementById('varList');
-        const currentImage = document.getElementById('currentImage');
-
-        function update_variables_list() {
-            varList.innerHTML = '';
-            let pool = state.variables[state.current_mode];
-            if (!pool || !Array.isArray(pool)) {
-                console.error('Invalid variable pool:', pool);
-                return;
-            }
-            if (pool.length === 0) {
-                // currentImage.innerHTML = '<div id="placeholder" class="placeholder">[无选择]</div>';
-                return;
-            }
-            pool.forEach((var_image, idx) => {
-                const div = document.createElement('div');
-                div.className = 'thumb';
-                div.innerHTML = `
-            <img src="${var_image.thumbnail}" alt="${var_image.name}">
-            <div class="info">
-                <div class="name">${var_image.name}</div>
-                <div class="size">${var_image.width} x ${var_image.height}</div>
-                <div class="memory">${var_image.memory} bytes</div>
-            </div>
-            <button class="delete-btn" title="删除">×</button>
-        `;
-                div.onclick = (e) => {
-                    // 避免点击删除按钮时触发选中
-                    if (e.target.classList.contains('delete-btn')) return;
-                    select_image_from_index(idx);
-                };
-                // 删除按钮事件
-                div.querySelector('.delete-btn').onclick = (e) => {
-                    e.stopPropagation();
-                    // 释放 Mat 内存
-                    if (pool[idx].unsafe_mat) {
-                        pool[idx].unsafe_mat.delete();
-                        pool[idx].unsafe_mat = null;
-                    }
-                    pool.splice(idx, 1);
-                    update_variables_list();
-                    // 如果删除的是当前选中，重置显示
-                    if (state.current_id === var_image.id) {
-                        state.current_id = null;
-                        const canvas = document.getElementById('mainCanvas');
-                        const placeholder = document.getElementById('placeholder');
-                        canvas.style.display = 'none';
-                        if (placeholder) placeholder.style.display = '';
-                    }
-                };
-                varList.appendChild(div);
-            });
-        }
-
-        function select_image_from_id(id) {
-            console.log('Selecting image with ID:', id);
-            const images = state.variables[state.current_mode];
-            const idx = images.findIndex(img => img.id === id);
-            if (idx === -1) {
-                console.error('Image not found with ID:', id);
-                return;
-            }
-            select_image_from_index(idx);
-        }
-
-        function select_image_from_index(idx) {
-            console.log('Selecting image at index:', idx);
-            const images = state.variables[state.current_mode];
-            Array.from(varList.children).forEach(el => el.classList.remove('selected'));
-            varList.children[idx].classList.add('selected');
-
-            const var_image = images[idx];
-            if (!var_image || !var_image.image) {
-                console.error('Invalid image variable:', var_image);
-                return;
-            }
-            state.current_id = var_image.id; // 更新当前选中的变量ID
-            console.log('Selected image variable:', var_image);
-            // 用 canvas 显示大图
-            const canvas = document.getElementById('mainCanvas');
-            const placeholder = document.getElementById('placeholder');
-            if (placeholder) placeholder.style.display = 'none';
-            canvas.width = var_image.width;
-            canvas.height = var_image.height;
-            canvas.style.display = '';
-            const ctx = canvas.getContext('2d');
-            ctx.putImageData(var_image.image, 0, 0);
-            if (state.panzoom_instance)
-                state.panzoom_instance.dispose(); // 释放之前的 panzoom 实例
-
-            state.panzoom_instance = panzoom(canvas, {
-                bounds: true,
-                boundsPadding: 0.1
-            });
-
-            const container = canvas.parentElement;
-            const containerRect = container.getBoundingClientRect();
-            const canvasRect = canvas.getBoundingClientRect();
-            // 计算最大自适应缩放比例
-            const scaleX = containerRect.width / var_image.width;
-            const scaleY = containerRect.height / var_image.height;
-            const scale = Math.min(scaleX, scaleY);
-            // 计算中心点
-            const offsetX = (containerRect.width - canvas.width) / 2;
-            const offsetY = (containerRect.height - canvas.height) / 2;
-            state.panzoom_instance.moveTo(offsetX, offsetY);
-            state.panzoom_instance.zoomAbs(offsetX, offsetY, scale);
-        }
-
-        update_variables_list();
-    </script>
-    <style>
-        .delete-btn {
-            position: absolute;
-            top: 4px;
-            right: 4px;
-            background: transparent;
-            border: none;
-            color: #f55;
-            font-size: 18px;
-            cursor: pointer;
-            z-index: 2;
-            padding: 0 6px;
-            line-height: 1;
-        }
-
-        .thumb {
-            position: relative;
-        }
-    </style>
-    <!-- 在 <body> 末尾添加右键菜单 DOM -->
     <ul id="customMenu" class="custom-menu">
         <li data-action="zoomToFit">缩放到适合</li>
         <li data-action="zoomToOriginal">缩放到原始大小</li>
         <li data-action="linkViews" class="checked">链接视图</li>
         <li class="separator"></li>
         <li data-action="autoMaxContrast" class="checked">归一化</li>
-        <li data-action="pseudoColor" class="checked">1通道伪彩色</li>
+        <li data-action="pseudoColor">1通道伪彩色</li>
         <li data-action="ignoreAlpha" class="checked">4通道忽略透明通道</li>
         <li class="separator"></li>
         <li data-action="hexDisplay" class="checked">Hex显示</li>
         <li class="separator"></li>
-        <li data-action="copyPixel">复制像素内存地址</li>
+        <li data-action="copyPixelAddr">复制像素内存地址</li>
+        <li data-action="copyPixelValue">复制像素值</li>
     </ul>
 
-    <style>
-        .custom-menu {
-            min-width: 220px;
-            background: #232323;
-            border-radius: 6px;
-            box-shadow: 0 2px 16px #000a;
-            padding: 6px 0;
-            margin: 0;
-            list-style: none;
-            font-size: 15px;
-            color: #ccc;
-            border: 1px solid #333;
-            display: none;
-            position: fixed;
-            z-index: 1000;
-        }
-
-        .custom-menu li {
-            padding: 6px 32px 6px 32px;
-            cursor: pointer;
-            position: relative;
-            user-select: none;
-            transition: background 0.15s;
-        }
-
-        .custom-menu li:hover {
-            background: #2a2d2e;
-            color: #fff;
-        }
-
-        .custom-menu li.checked::before {
-            content: "✔";
-            position: absolute;
-            left: 12px;
-            color: #4fc3f7;
-            font-size: 13px;
-        }
-
-        .custom-menu .separator {
-            height: 1px;
-            background: #333;
-            margin: 4px 0;
-            padding: 0;
-            pointer-events: none;
-        }
-    </style>
     <script>
-        const menu = document.getElementById('customMenu');
-        document.addEventListener('contextmenu', function (e) {
-            // 只在 mainView 区域弹出菜单
-            const mainView = document.getElementById('mainView');
-            if (mainView.contains(e.target)) {
-                e.preventDefault();
-                menu.style.display = 'block';
-                menu.style.left = e.clientX + 'px';
-                menu.style.top = e.clientY + 'px';
+    // =========================================================================
+    //  State & Constants
+    // =========================================================================
+
+    const var_image_t = {
+        from: 'watch',
+        id: null,
+        name: '图像变量',
+        width: 640,
+        height: 480,
+        memory: 0,
+        thumbnail: null,
+        processed: false,
+        image: null,
+        unsafe_mat: null,
+        matType: 0,
+        channels: 0,
+        depth: 0,
+        dataAddrHex: '',
+        step: []
+    };
+
+    const state = {
+        cvReady: false,
+        cvInstance: null,
+        variables: { local: [], watch: [] },
+        current_mode: 'local',
+        current_id: null,
+        lastViewedId: null,
+        hexDisplay: true,
+        linkViews: true,
+        viewStateMap: {},
+        image_processing_options: {
+            is_normalization_minmax: true,
+            is_pseudo_color: false,
+            is_ignore_alpha: true
+        }
+    };
+
+    const DEPTH_NAMES = ['8U', '8S', '16U', '16S', '32S', '32F', '64F'];
+    const DEPTH_BYTES = [1, 1, 2, 2, 4, 4, 8];
+    const GRID_THRESHOLD = 6;
+    const TEXT_THRESHOLD = 20;
+    const MIN_SCALE = 0.005;
+    const MAX_SCALE = 200;
+    const MAX_TEXT_CELLS = 4000;
+
+    // =========================================================================
+    //  Utilities
+    // =========================================================================
+
+    function getTypeName(type) {
+        const depth = type & 7;
+        const ch = ((type >> 3) & 63) + 1;
+        return 'CV_' + (DEPTH_NAMES[depth] || '?') + 'C' + ch;
+    }
+
+    function getDataView(mat) {
+        const depth = mat.type() & 7;
+        const d = mat.data;
+        switch (depth) {
+            case 0: return d;
+            case 1: return new Int8Array(d.buffer, d.byteOffset, d.byteLength);
+            case 2: return new Uint16Array(d.buffer, d.byteOffset, d.byteLength / 2);
+            case 3: return new Int16Array(d.buffer, d.byteOffset, d.byteLength / 2);
+            case 4: return new Int32Array(d.buffer, d.byteOffset, d.byteLength / 4);
+            case 5: return new Float32Array(d.buffer, d.byteOffset, d.byteLength / 4);
+            case 6: return new Float64Array(d.buffer, d.byteOffset, d.byteLength / 8);
+            default: return d;
+        }
+    }
+
+    function formatValue(value, depth, hex) {
+        if (depth === 5 || depth === 6) {
+            if (value === 0) return '0';
+            const abs = Math.abs(value);
+            if (abs >= 10000 || (abs < 0.01 && abs !== 0)) return value.toExponential(1);
+            return parseFloat(value.toFixed(2)).toString();
+        }
+        if (hex) return value.toString(16).toUpperCase().padStart(2, '0');
+        return value.toString();
+    }
+
+    function channelLabel(channels) {
+        if (channels === 1) return '';
+        if (channels === 3) return 'BGR';
+        if (channels === 4) return 'BGRA';
+        return 'C' + channels;
+    }
+
+    function copyToClipboard(text) {
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text);
             } else {
-                menu.style.display = 'none';
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.cssText = 'position:fixed;opacity:0';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
             }
+        } catch (_) {}
+    }
+
+    // =========================================================================
+    //  OpenCV & Image Processing (preserved logic)
+    // =========================================================================
+
+    function init_opencv() {
+        if (!window.cv || typeof window.cv.then !== 'function')
+            throw new Error('OpenCV.js is not loaded.');
+        window.cv.then((cv) => {
+            state.cvReady = true;
+            state.cvInstance = cv;
         });
-        document.addEventListener('click', function () {
-            menu.style.display = 'none';
-        });
-        menu.addEventListener('click', function (e) {
-            if (e.target.dataset.action) {
-                // 处理菜单点击
-                switch (e.target.dataset.action) {
-                    case 'zoomToFit':
-                        state.panzoom_instance.moveTo(0, 0);
-                        state.panzoom_instance.zoomAbs(0, 0, 1);
-                        break;
-                    case 'zoomToOriginal':
-                        state.panzoom_instance.zoomAbs(0, 0, 1);
-                        break;
-                    case 'linkViews':
-                    case 'autoMaxContrast':
-                        // 切换勾选状态
-                        e.target.classList.toggle('checked');
-                        // 更新图像处理选项
-                        state.image_processing_options.is_normalization_minmax = e.target.classList.contains('checked');
-                        if (state.current_id) {
-                            const var_image = state.variables[state.current_mode].find(img => img.id === state.current_id);
-                            if (var_image) {
-                                console.log('Process options:', state.image_processing_options);
-                                process_image(var_image, state.image_processing_options.is_normalization_minmax,
-                                    state.image_processing_options.is_pseudo_color,
-                                    state.image_processing_options.is_ignore_alpha);
-                                update_variables_list(); // 渲染缩略图列表
-                                select_image_from_id(var_image.id); // 重新选择当前图像以更新显示
-                            }
-                        }
-                        break;
-                    case 'pseudoColor':
-                        // 切换勾选状态
-                        e.target.classList.toggle('checked');
-                        // 更新图像处理选项
-                        state.image_processing_options.is_pseudo_color = e.target.classList.contains('checked');
-                        if (state.current_id) {
-                            const var_image = state.variables[state.current_mode].find(img => img.id === state.current_id);
-                            if (var_image) {
-                                console.log('Process options:', state.image_processing_options);
-                                process_image(var_image, state.image_processing_options.is_normalization_minmax,
-                                    state.image_processing_options.is_pseudo_color,
-                                    state.image_processing_options.is_ignore_alpha);
-                                update_variables_list(); // 渲染缩略图列表
-                                select_image_from_id(var_image.id); // 重新选择当前图像以更新显示
-                            }
-                        }
-                        break;
-                    case 'ignoreAlpha':
-                        // 切换勾选状态
-                        e.target.classList.toggle('checked');
-                        // 更新图像处理选项
-                        state.image_processing_options.is_ignore_alpha = e.target.classList.contains('checked');
-                        if (state.current_id) {
-                            const var_image = state.variables[state.current_mode].find(img => img.id === state.current_id);
-                            if (var_image) {
-                                console.log('Process options:', state.image_processing_options);
-                                process_image(var_image, state.image_processing_options.is_normalization_minmax,
-                                    state.image_processing_options.is_pseudo_color,
-                                    state.image_processing_options.is_ignore_alpha);
-                                update_variables_list(); // 渲染缩略图列表
-                                select_image_from_id(var_image.id); // 重新选择当前图像以更新显示
-                            }
-                        }
-                        break;
-                    case 'hexDisplay':
-                        // 切换勾选状态
-                        e.target.classList.toggle('checked');
-                        break;
-                    case 'copyPixel':
-                        // TODO: 实现 Copy Pixel Address
-                        navigator.clipboard.writeText(elements.coords.textContent);
-                        updateStatus('坐标已复制到剪贴板');
-                        break;
+    }
+
+    function image_from_mat(mat) {
+        return new ImageData(new Uint8ClampedArray(mat.data), mat.cols, mat.rows);
+    }
+
+    function base64_from_mat(mat) {
+        const img = new ImageData(new Uint8ClampedArray(mat.data), mat.cols, mat.rows);
+        const c = document.createElement('canvas');
+        c.width = mat.cols;
+        c.height = mat.rows;
+        c.getContext('2d').putImageData(img, 0, 0);
+        return c.toDataURL('image/png');
+    }
+
+    function thumbnail_from_mat(mat) {
+        const thumb = new state.cvInstance.Mat();
+        const sz = new state.cvInstance.Size(90, 76);
+        state.cvInstance.resize(mat, thumb, sz, 0, 0, state.cvInstance.INTER_LINEAR);
+        return thumb;
+    }
+
+    function array_from_memory(memory, type) {
+        const depth = type & 7;
+        switch (depth) {
+            case 0: case 1: return memory;
+            case 2: return new Uint16Array(memory.buffer, memory.byteOffset, memory.byteLength / 2);
+            case 3: return new Int16Array(memory.buffer, memory.byteOffset, memory.byteLength / 2);
+            case 4: return new Int32Array(memory.buffer, memory.byteOffset, memory.byteLength / 4);
+            case 5: return new Float32Array(memory.buffer, memory.byteOffset, memory.byteLength / 4);
+            case 6: return new Float64Array(memory.buffer, memory.byteOffset, memory.byteLength / 8);
+            default: throw new Error('Unsupported depth: ' + depth);
+        }
+    }
+
+    function var_from_message(data) {
+        const { mat, variable_name, memory } = data;
+        const mat_is_submat = mat.flags & 0x4000;
+        const mat_type = mat.flags & 0xFFF;
+
+        if (!state.cvReady) { console.error('OpenCV.js 尚未加载'); return; }
+
+        let array = array_from_memory(memory, mat_type);
+        let image = null;
+
+        if (!mat_is_submat) {
+            const use_addr = mat.data.addr;
+            const addr = mat.datastart.addr;
+            const size = mat.dataend.addr - addr;
+            const skip = use_addr - addr;
+            const ref_cols = mat.step[0];
+            const ref_rows = size / ref_cols;
+            let pos = [Math.floor(skip / ref_cols), Math.floor(skip % ref_cols)];
+            const ref_mat = new state.cvInstance.matFromArray(ref_rows, ref_cols, mat_type, array);
+            const roi = new state.cvInstance.Rect(pos[1], pos[0], mat.cols, mat.rows);
+            let roi_mat = ref_mat.roi(roi);
+            image = roi_mat.clone();
+            ref_mat.delete();
+            roi_mat.delete();
+        } else {
+            image = new state.cvInstance.matFromArray(mat.rows, mat.cols, mat_type, array);
+        }
+
+        let v = Object.assign({}, var_image_t);
+        v.unsafe_mat = image.clone();
+        v.width = image.cols;
+        v.height = image.rows;
+        v.matType = mat_type;
+        v.channels = image.channels();
+        v.depth = mat_type & 7;
+        image.delete();
+
+        v.name = variable_name;
+        v.memory = memory.length;
+        v.id = variable_name + '_' + Date.now();
+        v.dataAddrHex = mat.data.hex || '';
+        v.step = mat.step || [];
+        return v;
+    }
+
+    function deleteMat(m) { try { m.delete(); } catch (_) {} }
+
+    function process_image(v, norm, pseudo, ignoreAlpha) {
+        if (!v || !v.unsafe_mat) return;
+        const cv = state.cvInstance;
+        let cur = v.unsafe_mat.clone();
+        const srcDepth = cur.type() & 7;
+
+        // 1) Normalize to [0,255] CV_8U — use separate dst to avoid
+        //    in-place buffer resize corruption in WASM
+        if (norm || srcDepth !== 0) {
+            let tmp = new cv.Mat();
+            cv.normalize(cur, tmp, 0, 255, cv.NORM_MINMAX, cv.CV_8U);
+            deleteMat(cur);
+            cur = tmp;
+        }
+
+        // 2) Ignore alpha: BGRA → BGR (drops alpha channel)
+        if (ignoreAlpha && cur.channels() === 4) {
+            let tmp = new cv.Mat();
+            cv.cvtColor(cur, tmp, cv.COLOR_BGRA2BGR);
+            deleteMat(cur);
+            cur = tmp;
+        }
+
+        // 3) Pseudo color for single-channel images
+        if (cur.channels() === 1 && pseudo) {
+            if ((cur.type() & 7) !== 0) {
+                let tmp = new cv.Mat();
+                cv.normalize(cur, tmp, 0, 255, cv.NORM_MINMAX, cv.CV_8U);
+                deleteMat(cur);
+                cur = tmp;
+            }
+            let tmp = new cv.Mat();
+            cv.applyColorMap(cur, tmp, cv.COLORMAP_JET);
+            deleteMat(cur);
+            cur = tmp;
+            // cur is now CV_8UC3 in BGR order — falls through to BGR→RGBA below
+        }
+
+        // 4) Convert to RGBA byte order for Canvas ImageData.
+        //    OpenCV stores images as BGR/BGRA; Canvas expects RGBA.
+        //    Always use a separate dst Mat (channel count changes).
+        let rgba = new cv.Mat();
+        const ch = cur.channels();
+        if (ch === 1) {
+            cv.cvtColor(cur, rgba, cv.COLOR_GRAY2RGBA);
+        } else if (ch === 3) {
+            // BGR → RGBA  (COLOR_BGR2RGBA = COLOR_RGB2BGRA = 2)
+            cv.cvtColor(cur, rgba, cv.COLOR_RGB2BGRA);
+        } else if (ch === 4) {
+            // BGRA → RGBA  (COLOR_BGRA2RGBA = COLOR_RGBA2BGRA = 5)
+            cv.cvtColor(cur, rgba, cv.COLOR_RGBA2BGRA);
+        } else {
+            rgba = cur.clone();
+        }
+        deleteMat(cur);
+
+        // 5) Ensure CV_8UC4
+        if (rgba.type() !== cv.CV_8UC4) {
+            let tmp = new cv.Mat();
+            rgba.convertTo(tmp, cv.CV_8U);
+            deleteMat(rgba);
+            rgba = tmp;
+        }
+
+        v.image = image_from_mat(rgba);
+        v.processed = true;
+        const thumbMat = thumbnail_from_mat(rgba);
+        v.thumbnail = base64_from_mat(thumbMat);
+        deleteMat(thumbMat);
+        deleteMat(rgba);
+
+        const pool = state.variables[state.current_mode];
+        const idx = pool.findIndex(img => img.id === v.id);
+        if (idx !== -1) pool[idx] = v;
+    }
+
+    // =========================================================================
+    //  Image Viewer
+    // =========================================================================
+
+    const viewer = {
+        canvas: null,
+        ctx: null,
+        container: null,
+
+        imageCanvas: null,
+        currentVarImage: null,
+
+        offsetX: 0,
+        offsetY: 0,
+        scale: 1,
+
+        isDragging: false,
+        dragStartX: 0,
+        dragStartY: 0,
+        dragStartOffX: 0,
+        dragStartOffY: 0,
+
+        hoverImgX: -1,
+        hoverImgY: -1,
+
+        _renderPending: false,
+        _checkerPattern: null,
+
+        init() {
+            this.canvas = document.getElementById('mainCanvas');
+            this.ctx = this.canvas.getContext('2d');
+            this.container = document.getElementById('viewerContainer');
+
+            const ro = new ResizeObserver(() => this.resize());
+            ro.observe(this.container);
+            this.resize();
+
+            this.canvas.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                if (!this.imageCanvas) return;
+                const rect = this.canvas.getBoundingClientRect();
+                const mx = e.clientX - rect.left;
+                const my = e.clientY - rect.top;
+                const factor = e.deltaY < 0 ? 1.15 : (1 / 1.15);
+                this.zoomAt(mx, my, factor);
+            }, { passive: false });
+
+            this.canvas.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return;
+                if (e.ctrlKey && state.lastViewedId) {
+                    select_image_from_id(state.lastViewedId);
+                    return;
                 }
-                menu.style.display = 'none';
+                this.isDragging = true;
+                this.dragStartX = e.clientX;
+                this.dragStartY = e.clientY;
+                this.dragStartOffX = this.offsetX;
+                this.dragStartOffY = this.offsetY;
+                this.container.classList.add('dragging');
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (this.isDragging) {
+                    this.offsetX = this.dragStartOffX + (e.clientX - this.dragStartX);
+                    this.offsetY = this.dragStartOffY + (e.clientY - this.dragStartY);
+                    this.requestRender();
+                }
+                const rect = this.canvas.getBoundingClientRect();
+                const mx = e.clientX - rect.left;
+                const my = e.clientY - rect.top;
+                const [ix, iy] = this.screenToImage(mx, my);
+                if (ix !== this.hoverImgX || iy !== this.hoverImgY) {
+                    this.hoverImgX = ix;
+                    this.hoverImgY = iy;
+                    this.requestRender();
+                }
+                this.updateStatusBar();
+            });
+
+            window.addEventListener('mouseup', () => {
+                if (this.isDragging) {
+                    this.isDragging = false;
+                    this.container.classList.remove('dragging');
+                    this.saveViewState();
+                }
+            });
+
+            this.canvas.addEventListener('dblclick', () => this.fitToView());
+
+            this.canvas.addEventListener('mouseleave', () => {
+                this.hoverImgX = -1;
+                this.hoverImgY = -1;
+                this.updateStatusBar();
+                this.requestRender();
+            });
+        },
+
+        resize() {
+            const rect = this.container.getBoundingClientRect();
+            const w = Math.round(rect.width);
+            const h = Math.round(rect.height);
+            if (w < 1 || h < 1) return;
+            if (this.canvas.width !== w || this.canvas.height !== h) {
+                this.canvas.width = w;
+                this.canvas.height = h;
+                this._checkerPattern = null;
+                this.requestRender();
             }
+        },
+
+        requestRender() {
+            if (this._renderPending) return;
+            this._renderPending = true;
+            requestAnimationFrame(() => {
+                this._renderPending = false;
+                this.render();
+            });
+        },
+
+        screenToImage(sx, sy) {
+            if (!this.imageCanvas) return [-1, -1];
+            const ix = Math.floor((sx - this.offsetX) / this.scale);
+            const iy = Math.floor((sy - this.offsetY) / this.scale);
+            if (ix < 0 || iy < 0 || ix >= this.imageCanvas.width || iy >= this.imageCanvas.height)
+                return [-1, -1];
+            return [ix, iy];
+        },
+
+        zoomAt(sx, sy, factor) {
+            const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, this.scale * factor));
+            if (newScale === this.scale) return;
+            const ratio = newScale / this.scale;
+            this.offsetX = sx - (sx - this.offsetX) * ratio;
+            this.offsetY = sy - (sy - this.offsetY) * ratio;
+            this.scale = newScale;
+            this.updateStatusBar();
+            this.requestRender();
+            this.saveViewState();
+        },
+
+        fitToView() {
+            if (!this.imageCanvas) return;
+            const cw = this.canvas.width;
+            const ch = this.canvas.height;
+            const iw = this.imageCanvas.width;
+            const ih = this.imageCanvas.height;
+            this.scale = Math.min(cw / iw, ch / ih) * 0.95;
+            this.offsetX = (cw - iw * this.scale) / 2;
+            this.offsetY = (ch - ih * this.scale) / 2;
+            this.updateStatusBar();
+            this.requestRender();
+            this.saveViewState();
+        },
+
+        zoomToOriginal() {
+            if (!this.imageCanvas) return;
+            const cw = this.canvas.width;
+            const ch = this.canvas.height;
+            const iw = this.imageCanvas.width;
+            const ih = this.imageCanvas.height;
+            this.scale = 1;
+            this.offsetX = (cw - iw) / 2;
+            this.offsetY = (ch - ih) / 2;
+            this.updateStatusBar();
+            this.requestRender();
+            this.saveViewState();
+        },
+
+        getSizeKey() {
+            if (!this.imageCanvas) return null;
+            return this.imageCanvas.width + 'x' + this.imageCanvas.height;
+        },
+
+        saveViewState() {
+            if (!state.linkViews) return;
+            const key = this.getSizeKey();
+            if (key) state.viewStateMap[key] = {
+                offsetX: this.offsetX, offsetY: this.offsetY, scale: this.scale
+            };
+        },
+
+        setImage(varImage) {
+            this.saveViewState();
+            const isFirstImage = !this.imageCanvas;
+
+            this.currentVarImage = varImage;
+            const oc = document.createElement('canvas');
+            oc.width = varImage.width;
+            oc.height = varImage.height;
+            oc.getContext('2d').putImageData(varImage.image, 0, 0);
+            this.imageCanvas = oc;
+
+            document.getElementById('placeholder').style.display = 'none';
+
+            const sizeKey = this.getSizeKey();
+            const saved = sizeKey && state.viewStateMap[sizeKey];
+            if (state.linkViews && !isFirstImage && saved) {
+                this.offsetX = saved.offsetX;
+                this.offsetY = saved.offsetY;
+                this.scale = saved.scale;
+                this.updateStatusBar();
+                this.requestRender();
+            } else {
+                this.fitToView();
+            }
+        },
+
+        clearImage() {
+            this.currentVarImage = null;
+            this.imageCanvas = null;
+            this.hoverImgX = -1;
+            this.hoverImgY = -1;
+            document.getElementById('placeholder').style.display = '';
+            this.updateStatusBar();
+            this.requestRender();
+        },
+
+        // ----- Rendering -----
+
+        getCheckerPattern() {
+            if (this._checkerPattern) return this._checkerPattern;
+            const sz = 8;
+            const pc = document.createElement('canvas');
+            pc.width = sz * 2;
+            pc.height = sz * 2;
+            const pctx = pc.getContext('2d');
+            pctx.fillStyle = '#3a3a3a';
+            pctx.fillRect(0, 0, sz * 2, sz * 2);
+            pctx.fillStyle = '#2f2f2f';
+            pctx.fillRect(0, 0, sz, sz);
+            pctx.fillRect(sz, sz, sz, sz);
+            this._checkerPattern = this.ctx.createPattern(pc, 'repeat');
+            return this._checkerPattern;
+        },
+
+        render() {
+            const ctx = this.ctx;
+            const w = this.canvas.width;
+            const h = this.canvas.height;
+
+            ctx.fillStyle = '#2a2a2a';
+            ctx.fillRect(0, 0, w, h);
+
+            if (!this.imageCanvas || !this.currentVarImage) return;
+
+            const imgW = this.imageCanvas.width;
+            const imgH = this.imageCanvas.height;
+            const s = this.scale;
+            const ox = this.offsetX;
+            const oy = this.offsetY;
+
+            // Checkerboard behind image area
+            const l = Math.max(0, ox);
+            const t = Math.max(0, oy);
+            const r = Math.min(w, ox + imgW * s);
+            const b = Math.min(h, oy + imgH * s);
+            if (r > l && b > t) {
+                ctx.fillStyle = this.getCheckerPattern();
+                ctx.fillRect(l, t, r - l, b - t);
+            }
+
+            // Image
+            ctx.save();
+            ctx.imageSmoothingEnabled = false;
+            ctx.translate(ox, oy);
+            ctx.scale(s, s);
+            ctx.drawImage(this.imageCanvas, 0, 0);
+            ctx.restore();
+
+            // Grid lines
+            if (s >= GRID_THRESHOLD) {
+                this.drawGrid(ctx, imgW, imgH);
+            }
+
+            // Pixel values
+            if (s >= TEXT_THRESHOLD) {
+                this.drawPixelValues(ctx, imgW, imgH);
+            }
+
+            // Hover highlight
+            if (this.hoverImgX >= 0 && this.hoverImgY >= 0 && s >= 2) {
+                this.drawHighlight(ctx);
+            }
+        },
+
+        drawGrid(ctx, imgW, imgH) {
+            const s = this.scale;
+            const ox = this.offsetX;
+            const oy = this.offsetY;
+            const cw = this.canvas.width;
+            const ch = this.canvas.height;
+
+            const startCol = Math.max(0, Math.floor(-ox / s));
+            const startRow = Math.max(0, Math.floor(-oy / s));
+            const endCol = Math.min(imgW, Math.ceil((cw - ox) / s));
+            const endRow = Math.min(imgH, Math.ceil((ch - oy) / s));
+
+            ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+
+            for (let col = startCol; col <= endCol; col++) {
+                const x = Math.round(col * s + ox) + 0.5;
+                ctx.moveTo(x, Math.max(0, Math.round(startRow * s + oy)));
+                ctx.lineTo(x, Math.min(ch, Math.round(endRow * s + oy)));
+            }
+            for (let row = startRow; row <= endRow; row++) {
+                const y = Math.round(row * s + oy) + 0.5;
+                ctx.moveTo(Math.max(0, Math.round(startCol * s + ox)), y);
+                ctx.lineTo(Math.min(cw, Math.round(endCol * s + ox)), y);
+            }
+            ctx.stroke();
+        },
+
+        drawPixelValues(ctx, imgW, imgH) {
+            const v = this.currentVarImage;
+            if (!v || !v.unsafe_mat) return;
+
+            const mat = v.unsafe_mat;
+            const channels = v.channels;
+            const depth = v.depth;
+
+            let dataArr;
+            try { dataArr = getDataView(mat); }
+            catch (e) { return; }
+
+            const s = this.scale;
+            const ox = this.offsetX;
+            const oy = this.offsetY;
+            const cw = this.canvas.width;
+            const ch = this.canvas.height;
+
+            const startCol = Math.max(0, Math.floor(-ox / s));
+            const startRow = Math.max(0, Math.floor(-oy / s));
+            const endCol = Math.min(imgW, Math.ceil((cw - ox) / s));
+            const endRow = Math.min(imgH, Math.ceil((ch - oy) / s));
+
+            const visCount = (endCol - startCol) * (endRow - startRow);
+            if (visCount > MAX_TEXT_CELLS || visCount <= 0) return;
+
+            const displayData = v.image.data;
+            const dispW = v.image.width;
+            const hex = state.hexDisplay && depth <= 4;
+
+            const lineCount = Math.max(1, channels);
+            const fontSize = Math.max(7, Math.min(s / (lineCount + 0.5) * 0.75, 16));
+            ctx.font = fontSize + 'px Consolas,Monaco,monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            for (let row = startRow; row < endRow; row++) {
+                for (let col = startCol; col < endCol; col++) {
+                    const sx = col * s + ox;
+                    const sy = row * s + oy;
+
+                    // Text color from display brightness
+                    const dIdx = (row * dispW + col) * 4;
+                    const brightness = 0.299 * displayData[dIdx]
+                                     + 0.587 * displayData[dIdx + 1]
+                                     + 0.114 * displayData[dIdx + 2];
+                    ctx.fillStyle = brightness > 128
+                        ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.85)';
+
+                    const dataIdx = (row * mat.cols + col) * channels;
+                    if (channels === 1) {
+                        const txt = formatValue(dataArr[dataIdx], depth, hex);
+                        ctx.fillText(txt, sx + s / 2, sy + s / 2);
+                    } else {
+                        const lineH = s / channels;
+                        for (let c = 0; c < channels; c++) {
+                            const txt = formatValue(dataArr[dataIdx + c], depth, hex);
+                            ctx.fillText(txt, sx + s / 2, sy + lineH * (c + 0.5));
+                        }
+                    }
+                }
+            }
+        },
+
+        drawHighlight(ctx) {
+            const s = this.scale;
+            const hx = this.hoverImgX * s + this.offsetX;
+            const hy = this.hoverImgY * s + this.offsetY;
+            ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(hx, hy, s, s);
+            ctx.strokeStyle = '#ffcc00';
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(hx + 1, hy + 1, s - 2, s - 2);
+        },
+
+        // ----- Status Bar -----
+
+        updateStatusBar() {
+            const elCoords = document.getElementById('statusCoords');
+            const elValue = document.getElementById('statusValue');
+            const elSize = document.getElementById('statusSize');
+            const elZoom = document.getElementById('statusZoom');
+
+            elZoom.textContent = '缩放: ' + (this.scale * 100).toFixed(1) + '%';
+
+            const v = this.currentVarImage;
+            if (!v) {
+                elCoords.textContent = '-';
+                elValue.textContent = '-';
+                elSize.textContent = '-';
+                return;
+            }
+
+            elSize.textContent = v.width + ' × ' + v.height + ' ' + getTypeName(v.matType);
+
+            const ix = this.hoverImgX;
+            const iy = this.hoverImgY;
+            if (ix < 0 || iy < 0) {
+                elCoords.textContent = '-';
+                elValue.textContent = '-';
+                return;
+            }
+
+            elCoords.textContent = '(' + ix + ', ' + iy + ')';
+
+            if (!v.unsafe_mat) {
+                elValue.textContent = '-';
+                return;
+            }
+
+            try {
+                const mat = v.unsafe_mat;
+                const channels = v.channels;
+                const depth = v.depth;
+                const dataArr = getDataView(mat);
+                const idx = (iy * mat.cols + ix) * channels;
+                const hex = state.hexDisplay && depth <= 4;
+
+                const vals = [];
+                for (let c = 0; c < channels; c++) {
+                    vals.push(formatValue(dataArr[idx + c], depth, hex));
+                }
+
+                const label = channelLabel(channels);
+                elValue.textContent = (label ? label + ': ' : '') + '[' + vals.join(', ') + ']';
+            } catch (e) {
+                elValue.textContent = '-';
+            }
+        }
+    };
+
+    // =========================================================================
+    //  UI: Sidebar, Resizer, Variable List, Context Menu
+    // =========================================================================
+
+    const varList = document.getElementById('varList');
+
+    function update_variables_list() {
+        varList.innerHTML = '';
+        const pool = state.variables[state.current_mode];
+        if (!pool || pool.length === 0) return;
+
+        pool.forEach((v, idx) => {
+            const div = document.createElement('div');
+            div.className = 'thumb';
+            if (v.id === state.current_id) div.classList.add('selected');
+            div.innerHTML =
+                '<img src="' + (v.thumbnail || '') + '" alt="' + v.name + '">' +
+                '<div class="info">' +
+                '  <div class="name">' + v.name + '</div>' +
+                '  <div class="size">' + v.width + ' × ' + v.height + '</div>' +
+                '  <div class="memory">' + v.memory + ' bytes</div>' +
+                '</div>' +
+                '<button class="delete-btn" title="删除">×</button>';
+
+            div.onclick = (e) => {
+                if (e.target.classList.contains('delete-btn')) return;
+                select_image_from_index(idx);
+            };
+            div.querySelector('.delete-btn').onclick = (e) => {
+                e.stopPropagation();
+                if (pool[idx].unsafe_mat) {
+                    pool[idx].unsafe_mat.delete();
+                    pool[idx].unsafe_mat = null;
+                }
+                const wasSelected = state.current_id === v.id;
+                pool.splice(idx, 1);
+                update_variables_list();
+                if (wasSelected) {
+                    state.current_id = null;
+                    viewer.clearImage();
+                }
+            };
+            varList.appendChild(div);
         });
+    }
+
+    function select_image_from_id(id) {
+        const images = state.variables[state.current_mode];
+        const idx = images.findIndex(img => img.id === id);
+        if (idx !== -1) select_image_from_index(idx);
+    }
+
+    function select_image_from_index(idx) {
+        const images = state.variables[state.current_mode];
+        const v = images[idx];
+        if (!v || !v.image) return;
+
+        if (state.current_id && state.current_id !== v.id) {
+            state.lastViewedId = state.current_id;
+        }
+        state.current_id = v.id;
+        Array.from(varList.children).forEach(el => el.classList.remove('selected'));
+        if (varList.children[idx]) varList.children[idx].classList.add('selected');
+        viewer.setImage(v);
+    }
+
+    // ----- Mode toggle -----
+
+    const btnLocal = document.getElementById('btnLocal');
+    const btnWatch = document.getElementById('btnWatch');
+
+    function switch_local() {
+        btnLocal.classList.add('selected');
+        btnWatch.classList.remove('selected');
+        state.current_mode = 'local';
+        update_variables_list();
+    }
+    function switch_watch() {
+        btnWatch.classList.add('selected');
+        btnLocal.classList.remove('selected');
+        state.current_mode = 'watch';
+        update_variables_list();
+    }
+    btnLocal.onclick = switch_local;
+    btnWatch.onclick = switch_watch;
+
+    // ----- Sidebar resizer -----
+
+    const resizer = document.getElementById('resizer');
+    const sidebar = document.getElementById('thumbList');
+    let isResizing = false;
+
+    resizer.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        document.body.style.cursor = 'ew-resize';
+    });
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+        const w = Math.min(Math.max(e.clientX, 100), window.innerWidth - 100);
+        sidebar.style.width = w + 'px';
+    });
+    document.addEventListener('mouseup', () => {
+        if (isResizing) {
+            isResizing = false;
+            document.body.style.cursor = '';
+        }
+    });
+
+    // ----- Context menu -----
+
+    const menu = document.getElementById('customMenu');
+
+    document.addEventListener('contextmenu', (e) => {
+        const mainView = document.getElementById('mainView');
+        if (mainView.contains(e.target)) {
+            e.preventDefault();
+            menu.style.display = 'block';
+            menu.style.left = e.clientX + 'px';
+            menu.style.top = e.clientY + 'px';
+        } else {
+            menu.style.display = 'none';
+        }
+    });
+
+    document.addEventListener('click', () => { menu.style.display = 'none'; });
+
+    function reprocessCurrent() {
+        if (!state.current_id) return;
+        const v = state.variables[state.current_mode].find(img => img.id === state.current_id);
+        if (!v) return;
+        const o = state.image_processing_options;
+        process_image(v, o.is_normalization_minmax, o.is_pseudo_color, o.is_ignore_alpha);
+        update_variables_list();
+        select_image_from_id(v.id);
+    }
+
+    menu.addEventListener('click', (e) => {
+        const action = e.target.dataset.action;
+        if (!action) return;
+
+        switch (action) {
+            case 'zoomToFit':
+                viewer.fitToView();
+                break;
+            case 'zoomToOriginal':
+                viewer.zoomToOriginal();
+                break;
+            case 'autoMaxContrast':
+                e.target.classList.toggle('checked');
+                state.image_processing_options.is_normalization_minmax = e.target.classList.contains('checked');
+                reprocessCurrent();
+                break;
+            case 'pseudoColor':
+                e.target.classList.toggle('checked');
+                state.image_processing_options.is_pseudo_color = e.target.classList.contains('checked');
+                reprocessCurrent();
+                break;
+            case 'ignoreAlpha':
+                e.target.classList.toggle('checked');
+                state.image_processing_options.is_ignore_alpha = e.target.classList.contains('checked');
+                reprocessCurrent();
+                break;
+            case 'hexDisplay':
+                e.target.classList.toggle('checked');
+                state.hexDisplay = e.target.classList.contains('checked');
+                viewer.requestRender();
+                viewer.updateStatusBar();
+                break;
+            case 'linkViews':
+                e.target.classList.toggle('checked');
+                state.linkViews = e.target.classList.contains('checked');
+                if (state.linkViews) viewer.saveViewState();
+                break;
+            case 'copyPixelAddr': {
+                const v = viewer.currentVarImage;
+                const ix = viewer.hoverImgX;
+                const iy = viewer.hoverImgY;
+                if (v && v.dataAddrHex && v.step && v.step.length > 0 && ix >= 0 && iy >= 0) {
+                    const step1 = v.step.length > 1
+                        ? v.step[1]
+                        : (DEPTH_BYTES[v.depth] || 1) * v.channels;
+                    const addr = BigInt(v.dataAddrHex)
+                        + BigInt(iy) * BigInt(v.step[0])
+                        + BigInt(ix) * BigInt(step1);
+                    copyToClipboard('0x' + addr.toString(16).toUpperCase().padStart(16, '0'));
+                }
+                break;
+            }
+            case 'copyPixelValue': {
+                const el = document.getElementById('statusValue');
+                if (el && el.textContent !== '-') {
+                    copyToClipboard(el.textContent);
+                }
+                break;
+            }
+        }
+        menu.style.display = 'none';
+    });
+
+    // =========================================================================
+    //  Message Handler (from extension)
+    // =========================================================================
+
+    window.addEventListener('message', event => {
+        if (!event.data || event.data.command !== 'add_variable') return;
+
+        const v = var_from_message(event.data);
+        if (!v) return;
+
+        if (v.from === 'local') {
+            state.variables.local.push(v);
+        } else {
+            state.variables.watch.push(v);
+        }
+
+        const o = state.image_processing_options;
+        process_image(v, o.is_normalization_minmax, o.is_pseudo_color, o.is_ignore_alpha);
+        switch_watch();
+        update_variables_list();
+        select_image_from_id(v.id);
+    });
+
+    // =========================================================================
+    //  Init
+    // =========================================================================
+
+    init_opencv();
+    viewer.init();
+    update_variables_list();
     </script>
 </body>
 
