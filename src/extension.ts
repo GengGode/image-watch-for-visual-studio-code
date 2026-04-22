@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { ImageWatchWebviewViewProvider } from './image-watch-webview-view';
-import { tryParseAsImage, readMatMemory } from './mat-utils';
+import { tryParseAsImage, readMatMemory, matInfoToMessage } from './mat-utils';
 import { createTrackerFactory, addWatchedVariable, clearWatchedVariables } from './debug-tracker';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -79,7 +79,7 @@ export function activate(context: vscode.ExtensionContext) {
                     command: 'add_variable',
                     variable_name: varName,
                     memory: memory,
-                    mat: mat,
+                    mat: matInfoToMessage(mat),
                     from: 'watch'
                 });
             });

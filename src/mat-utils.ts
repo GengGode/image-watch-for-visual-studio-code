@@ -9,7 +9,7 @@ import {
 // ---------------------------------------------------------------------------
 
 export interface Ptr {
-    addr: number;
+    addr: bigint;
     hex: string;
 }
 
@@ -137,6 +137,20 @@ export function tryParseAsImage(variables: any[]): MatInfo | null {
 }
 
 // ---------------------------------------------------------------------------
+//  Serialize MatInfo for webview postMessage (bigint → number for JSON safety)
+// ---------------------------------------------------------------------------
+
+export function matInfoToMessage(mat: MatInfo): Record<string, unknown> {
+    return {
+        ...mat,
+        data: { hex: mat.data.hex },
+        datastart: { hex: mat.datastart.hex },
+        dataend: { hex: mat.dataend.hex },
+        datalimit: { hex: mat.datalimit.hex },
+    };
+}
+
+// ---------------------------------------------------------------------------
 //  Read pixel memory via DAP
 // ---------------------------------------------------------------------------
 
@@ -144,11 +158,12 @@ export async function readMatMemory(
     session: vscode.DebugSession,
     mat: MatInfo
 ): Promise<Uint8Array | null> {
-    const count = mat.dataend.addr - mat.datastart.addr;
-    if (count <= 0) {
-        console.log(`[ImageWatch] readMatMemory: invalid count ${count} (dataend=${mat.dataend.hex}, datastart=${mat.datastart.hex})`);
+    const countBig = mat.dataend.addr - mat.datastart.addr;
+    if (countBig <= 0n) {
+        console.log(`[ImageWatch] readMatMemory: invalid count ${countBig} (dataend=${mat.dataend.hex}, datastart=${mat.datastart.hex})`);
         return null;
     }
+    const count = Number(countBig);
 
     const refs = [mat.datastart.hex];
     const alt = '0x' + mat.datastart.addr.toString(16);

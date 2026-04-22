@@ -184,7 +184,7 @@ function getMappingFields(mapping: FieldMapping): string[] {
 // ---------------------------------------------------------------------------
 
 interface Ptr {
-    addr: number;
+    addr: bigint;
     hex: string;
 }
 
@@ -192,14 +192,13 @@ function parseAnyPointer(variable: any): Ptr {
     const str = String(variable.value);
     const match = str.match(/0x[0-9a-fA-F]+/);
     if (!match) {
-        return { addr: 0, hex: '0x0000000000000000' };
+        return { addr: 0n, hex: '0x0000000000000000' };
     }
     const raw = match[0];
     const hex = raw.length < 18
         ? '0x' + raw.slice(2).padStart(16, '0')
         : raw.substring(0, 18);
-    const bigVal = BigInt(hex);
-    return { addr: Number(bigVal), hex };
+    return { addr: BigInt(hex), hex };
 }
 
 function parseIntValue(variable: any): number {
@@ -348,16 +347,16 @@ function resolveStep(mapping: StepMapping, variables: any[], cols: number, chann
     return fallback;
 }
 
-function evalSimpleExpr(expr: string, vars: Record<string, number>): number {
+function evalSimpleExpr(expr: string, vars: Record<string, bigint>): bigint {
     const tokens = expr.replace(/([+\-*()])/g, ' $1 ').split(/\s+/).filter(Boolean);
-    const output: (number | string)[] = [];
+    const output: bigint[] = [];
     const ops: string[] = [];
     const prec: Record<string, number> = { '+': 1, '-': 1, '*': 2 };
 
     function applyOp() {
         const op = ops.pop()!;
-        const b = output.pop() as number;
-        const a = output.pop() as number;
+        const b = output.pop()!;
+        const a = output.pop()!;
         if (op === '+') { output.push(a + b); }
         else if (op === '-') { output.push(a - b); }
         else if (op === '*') { output.push(a * b); }
@@ -373,18 +372,17 @@ function evalSimpleExpr(expr: string, vars: Record<string, number>): number {
             while (ops.length && prec[ops[ops.length - 1]] >= prec[tok]) { applyOp(); }
             ops.push(tok);
         } else {
-            const num = Number(tok);
-            if (!isNaN(num)) {
-                output.push(num);
+            if (/^-?\d+$/.test(tok)) {
+                output.push(BigInt(tok));
             } else if (vars[tok] !== undefined) {
                 output.push(vars[tok]);
             } else {
-                output.push(0);
+                output.push(0n);
             }
         }
     }
     while (ops.length) { applyOp(); }
-    return (output[0] as number) || 0;
+    return output[0] ?? 0n;
 }
 
 export function extractImageInfo(
@@ -411,8 +409,9 @@ export function extractImageInfo(
 
     const cvType = cvDepth + ((channels - 1) << 3);
 
-    const exprVars: Record<string, number> = {
-        rows, cols, channels, step: step[0], depth: cvDepth
+    const exprVars: Record<string, bigint> = {
+        rows: BigInt(rows), cols: BigInt(cols), channels: BigInt(channels),
+        step: BigInt(step[0]), depth: BigInt(cvDepth)
     };
 
     const datastartMember = findMember(variables, 'datastart');
@@ -428,15 +427,16 @@ export function extractImageInfo(
     } else {
         datastartPtr = dataPtr;
         const memSize = evalSimpleExpr(fmt.descriptor.memorySize, exprVars);
+        const endAddr = dataPtr.addr + memSize;
         dataendPtr = {
-            addr: dataPtr.addr + memSize,
-            hex: '0x' + (dataPtr.addr + memSize).toString(16).padStart(16, '0')
+            addr: endAddr,
+            hex: '0x' + endAddr.toString(16).padStart(16, '0')
         };
         exprVars['datastart'] = datastartPtr.addr;
         exprVars['dataend'] = dataendPtr.addr;
     }
 
-    const memorySize = evalSimpleExpr(fmt.descriptor.memorySize, exprVars);
+    const memorySize = Number(evalSimpleExpr(fmt.descriptor.memorySize, exprVars));
     if (memorySize <= 0) { return null; }
 
     const flagsMember = findMember(variables, 'flags');

@@ -230,9 +230,9 @@
             ? mat.step[0]
             : rowBytes;
 
-        const use_addr = mat.data.addr;
-        const addr = mat.datastart.addr;
-        const skip = Math.max(0, use_addr - addr);
+        const useAddrBig = BigInt(mat.data.hex || '0x0');
+        const startAddrBig = BigInt(mat.datastart.hex || '0x0');
+        const skip = Math.max(0, Number(useAddrBig - startAddrBig));
 
         if (skip === 0 && srcStep === rowBytes) {
             const array = array_from_memory(mem, mat_type);
