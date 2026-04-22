@@ -200,11 +200,11 @@
             ? memory.buffer
             : memory.buffer.slice(memory.byteOffset, memory.byteOffset + memory.byteLength);
         switch (depth) {
-            case 2: return new Uint16Array(aligned);
-            case 3: return new Int16Array(aligned);
-            case 4: return new Int32Array(aligned);
-            case 5: return new Float32Array(aligned);
-            case 6: return new Float64Array(aligned);
+            case 2: return new Uint16Array(aligned, 0, (aligned.byteLength >>> 1));
+            case 3: return new Int16Array(aligned, 0, (aligned.byteLength >>> 1));
+            case 4: return new Int32Array(aligned, 0, (aligned.byteLength >>> 2));
+            case 5: return new Float32Array(aligned, 0, (aligned.byteLength >>> 2));
+            case 6: return new Float64Array(aligned, 0, (aligned.byteLength >>> 3));
             default: return memory;
         }
     }
