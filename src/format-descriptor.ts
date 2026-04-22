@@ -143,10 +143,40 @@ export function matchesType(fmt: CompiledFormat, typeStr: string): boolean {
 }
 
 export function matchesMembers(fmt: CompiledFormat, variables: any[]): boolean {
-    if (variables.length !== fmt.descriptor.members.length) {
-        return false;
+    const names = new Set(variables.map(v => v.name));
+    const required = getMappingFields(fmt.descriptor.mapping);
+    return required.every(name => names.has(name));
+}
+
+function getMappingFields(mapping: FieldMapping): string[] {
+    const fields: string[] = [];
+    fields.push(mapping.rows, mapping.cols);
+
+    if (typeof mapping.data === 'string') { fields.push(mapping.data); }
+
+    if (typeof mapping.step === 'string') {
+        fields.push(mapping.step);
+    } else if ('field' in mapping.step) {
+        fields.push((mapping.step as StepMappingOpenCV).field);
     }
-    return variables.every((v, i) => v.name === fmt.descriptor.members[i]);
+
+    if (typeof mapping.channels === 'string') {
+        fields.push(mapping.channels);
+    } else if ('fromFlags' in mapping.channels) {
+        fields.push((mapping.channels as ChannelMappingFromFlags).fromFlags);
+    } else if ('field' in mapping.channels) {
+        fields.push((mapping.channels as ChannelMappingCustom).field);
+    }
+
+    if (typeof mapping.depth === 'string') {
+        fields.push(mapping.depth);
+    } else if ('fromFlags' in mapping.depth) {
+        fields.push((mapping.depth as DepthMappingFromFlags).fromFlags);
+    } else if ('field' in mapping.depth) {
+        fields.push((mapping.depth as DepthMappingFromField | DepthMappingCustom).field);
+    }
+
+    return [...new Set(fields)];
 }
 
 // ---------------------------------------------------------------------------
@@ -154,7 +184,7 @@ export function matchesMembers(fmt: CompiledFormat, variables: any[]): boolean {
 // ---------------------------------------------------------------------------
 
 interface Ptr {
-    addr: number;
+    addr: bigint;
     hex: string;
 }
 
@@ -162,13 +192,13 @@ function parseAnyPointer(variable: any): Ptr {
     const str = String(variable.value);
     const match = str.match(/0x[0-9a-fA-F]+/);
     if (!match) {
-        return { addr: 0, hex: '0x0000000000000000' };
+        return { addr: 0n, hex: '0x0000000000000000' };
     }
     const raw = match[0];
     const hex = raw.length < 18
         ? '0x' + raw.slice(2).padStart(16, '0')
         : raw.substring(0, 18);
-    return { addr: parseInt(hex), hex };
+    return { addr: BigInt(hex), hex };
 }
 
 function parseIntValue(variable: any): number {
@@ -183,18 +213,32 @@ function parseSizeT(variable: any): number {
 
 function parseOpenCVStep(variable: any): number[] {
     const step_str = String(variable.value);
+
     const bufMatch = step_str.match(/buf=\S+\s*\{([^}]*)\}/);
-    let buf_array: number[] = [];
     if (bufMatch && bufMatch[1]) {
-        buf_array = bufMatch[1].split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+        const arr = bufMatch[1].split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0);
+        if (arr.length > 0) { return arr; }
     }
-    const firstMatch = step_str.match(/\{(\d+)\}/);
-    if (firstMatch && firstMatch[1]) {
-        if (buf_array.length === 0 || buf_array[0] !== parseInt(firstMatch[1])) {
-            buf_array.unshift(parseInt(firstMatch[1]));
-        }
+
+    const braceMatch = step_str.match(/\{([^}]+)\}/);
+    if (braceMatch && braceMatch[1]) {
+        const arr = braceMatch[1].split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0);
+        if (arr.length > 0) { return arr; }
     }
-    return buf_array;
+
+    const bracketMatch = step_str.match(/\[([^\]]+)\]/);
+    if (bracketMatch && bracketMatch[1]) {
+        const arr = bracketMatch[1].split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0);
+        if (arr.length > 0) { return arr; }
+    }
+
+    const plainNumbers = step_str.match(/\d+/g);
+    if (plainNumbers) {
+        const arr = plainNumbers.map(s => parseInt(s)).filter(n => n > 0);
+        if (arr.length > 0) { return arr; }
+    }
+
+    return [];
 }
 
 function byteSizeToCvDepth(byteSize: number, preferFloat: boolean): number {
@@ -283,31 +327,36 @@ function resolveChannels(mapping: ChannelMapping, variables: any[]): number {
     return 1;
 }
 
-function resolveStep(mapping: StepMapping, variables: any[]): number[] {
+function resolveStep(mapping: StepMapping, variables: any[], cols: number, channels: number, cvDepth: number): number[] {
+    const elemSize1 = [1, 1, 2, 2, 4, 4, 8][cvDepth] ?? 1;
+    const fallback = [cols * channels * elemSize1];
+
     if (typeof mapping === 'string') {
         const m = findMember(variables, mapping);
-        if (!m) { return [0]; }
-        return [parseSizeT(m)];
+        if (!m) { return fallback; }
+        const val = parseSizeT(m);
+        return val > 0 ? [val] : fallback;
     }
     if ('interpret' in mapping) {
         const sm = mapping as StepMappingOpenCV;
         const m = findMember(variables, sm.field);
-        if (!m) { return [0]; }
-        return parseOpenCVStep(m);
+        if (!m) { return fallback; }
+        const result = parseOpenCVStep(m);
+        return result.length > 0 && result[0] > 0 ? result : fallback;
     }
-    return [0];
+    return fallback;
 }
 
-function evalSimpleExpr(expr: string, vars: Record<string, number>): number {
+function evalSimpleExpr(expr: string, vars: Record<string, bigint>): bigint {
     const tokens = expr.replace(/([+\-*()])/g, ' $1 ').split(/\s+/).filter(Boolean);
-    const output: (number | string)[] = [];
+    const output: bigint[] = [];
     const ops: string[] = [];
     const prec: Record<string, number> = { '+': 1, '-': 1, '*': 2 };
 
     function applyOp() {
         const op = ops.pop()!;
-        const b = output.pop() as number;
-        const a = output.pop() as number;
+        const b = output.pop()!;
+        const a = output.pop()!;
         if (op === '+') { output.push(a + b); }
         else if (op === '-') { output.push(a - b); }
         else if (op === '*') { output.push(a * b); }
@@ -323,18 +372,17 @@ function evalSimpleExpr(expr: string, vars: Record<string, number>): number {
             while (ops.length && prec[ops[ops.length - 1]] >= prec[tok]) { applyOp(); }
             ops.push(tok);
         } else {
-            const num = Number(tok);
-            if (!isNaN(num)) {
-                output.push(num);
+            if (/^-?\d+$/.test(tok)) {
+                output.push(BigInt(tok));
             } else if (vars[tok] !== undefined) {
                 output.push(vars[tok]);
             } else {
-                output.push(0);
+                output.push(0n);
             }
         }
     }
     while (ops.length) { applyOp(); }
-    return (output[0] as number) || 0;
+    return output[0] ?? 0n;
 }
 
 export function extractImageInfo(
@@ -355,14 +403,15 @@ export function extractImageInfo(
     const channels = resolveChannels(m.channels, variables);
     const cvDepth = resolveDepth(m.depth, variables);
     const dataPtr = parseAnyPointer(dataVar);
-    const step = resolveStep(m.step, variables);
+    const step = resolveStep(m.step, variables, cols, channels, cvDepth);
 
     if (step[0] <= 0) { return null; }
 
     const cvType = cvDepth + ((channels - 1) << 3);
 
-    const exprVars: Record<string, number> = {
-        rows, cols, channels, step: step[0], depth: cvDepth
+    const exprVars: Record<string, bigint> = {
+        rows: BigInt(rows), cols: BigInt(cols), channels: BigInt(channels),
+        step: BigInt(step[0]), depth: BigInt(cvDepth)
     };
 
     const datastartMember = findMember(variables, 'datastart');
@@ -378,15 +427,16 @@ export function extractImageInfo(
     } else {
         datastartPtr = dataPtr;
         const memSize = evalSimpleExpr(fmt.descriptor.memorySize, exprVars);
+        const endAddr = dataPtr.addr + memSize;
         dataendPtr = {
-            addr: dataPtr.addr + memSize,
-            hex: '0x' + (dataPtr.addr + memSize).toString(16).padStart(16, '0')
+            addr: endAddr,
+            hex: '0x' + endAddr.toString(16).padStart(16, '0')
         };
         exprVars['datastart'] = datastartPtr.addr;
         exprVars['dataend'] = dataendPtr.addr;
     }
 
-    const memorySize = evalSimpleExpr(fmt.descriptor.memorySize, exprVars);
+    const memorySize = Number(evalSimpleExpr(fmt.descriptor.memorySize, exprVars));
     if (memorySize <= 0) { return null; }
 
     const flagsMember = findMember(variables, 'flags');

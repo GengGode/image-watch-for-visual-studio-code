@@ -9,7 +9,7 @@ import {
 // ---------------------------------------------------------------------------
 
 export interface Ptr {
-    addr: number;
+    addr: bigint;
     hex: string;
 }
 
@@ -137,6 +137,20 @@ export function tryParseAsImage(variables: any[]): MatInfo | null {
 }
 
 // ---------------------------------------------------------------------------
+//  Serialize MatInfo for webview postMessage (bigint → number for JSON safety)
+// ---------------------------------------------------------------------------
+
+export function matInfoToMessage(mat: MatInfo): Record<string, unknown> {
+    return {
+        ...mat,
+        data: { hex: mat.data.hex },
+        datastart: { hex: mat.datastart.hex },
+        dataend: { hex: mat.dataend.hex },
+        datalimit: { hex: mat.datalimit.hex },
+    };
+}
+
+// ---------------------------------------------------------------------------
 //  Read pixel memory via DAP
 // ---------------------------------------------------------------------------
 
@@ -144,23 +158,32 @@ export async function readMatMemory(
     session: vscode.DebugSession,
     mat: MatInfo
 ): Promise<Uint8Array | null> {
-    const count = mat.dataend.addr - mat.datastart.addr;
-    if (count <= 0) {
+    const countBig = mat.dataend.addr - mat.datastart.addr;
+    if (countBig <= 0n) {
+        console.log(`[ImageWatch] readMatMemory: invalid count ${countBig} (dataend=${mat.dataend.hex}, datastart=${mat.datastart.hex})`);
         return null;
     }
-    try {
-        const resp = await session.customRequest('readMemory', {
-            memoryReference: mat.datastart.hex,
-            offset: 0,
-            count
-        });
-        if (!resp || !resp.data) {
-            return null;
+    const count = Number(countBig);
+
+    const refs = [mat.datastart.hex];
+    const alt = '0x' + mat.datastart.addr.toString(16);
+    if (alt !== mat.datastart.hex) { refs.push(alt); }
+
+    for (const ref of refs) {
+        try {
+            const resp = await session.customRequest('readMemory', {
+                memoryReference: ref,
+                offset: 0,
+                count
+            });
+            if (resp?.data) {
+                return Uint8Array.from(Buffer.from(resp.data, 'base64'));
+            }
+        } catch (err) {
+            console.log(`[ImageWatch] readMemory with ref ${ref} failed:`, err);
         }
-        return Uint8Array.from(Buffer.from(resp.data, 'base64'));
-    } catch {
-        return null;
     }
+    return null;
 }
 
 // ---------------------------------------------------------------------------

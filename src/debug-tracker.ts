@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { ImageWatchWebviewViewProvider } from './image-watch-webview-view';
-import { findImagesInScope, MatVariable } from './mat-utils';
+import { findImagesInScope, MatVariable, matInfoToMessage } from './mat-utils';
 
 let watchedVariableNames: Set<string> = new Set();
 
@@ -90,7 +90,7 @@ function sendSetLocalVariables(mats: MatVariable[]) {
     const items = mats.map(m => ({
         variable_name: m.name,
         memory: m.memory,
-        mat: m.mat,
+        mat: matInfoToMessage(m.mat),
         from: 'local'
     }));
 
@@ -108,7 +108,7 @@ function sendUpdateVariable(m: MatVariable) {
             command: 'update_variable',
             variable_name: m.name,
             memory: m.memory,
-            mat: m.mat
+            mat: matInfoToMessage(m.mat)
         });
     });
 }
