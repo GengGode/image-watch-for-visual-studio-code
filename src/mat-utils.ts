@@ -146,21 +146,29 @@ export async function readMatMemory(
 ): Promise<Uint8Array | null> {
     const count = mat.dataend.addr - mat.datastart.addr;
     if (count <= 0) {
+        console.log(`[ImageWatch] readMatMemory: invalid count ${count} (dataend=${mat.dataend.hex}, datastart=${mat.datastart.hex})`);
         return null;
     }
-    try {
-        const resp = await session.customRequest('readMemory', {
-            memoryReference: mat.datastart.hex,
-            offset: 0,
-            count
-        });
-        if (!resp || !resp.data) {
-            return null;
+
+    const refs = [mat.datastart.hex];
+    const alt = '0x' + mat.datastart.addr.toString(16);
+    if (alt !== mat.datastart.hex) { refs.push(alt); }
+
+    for (const ref of refs) {
+        try {
+            const resp = await session.customRequest('readMemory', {
+                memoryReference: ref,
+                offset: 0,
+                count
+            });
+            if (resp?.data) {
+                return Uint8Array.from(Buffer.from(resp.data, 'base64'));
+            }
+        } catch (err) {
+            console.log(`[ImageWatch] readMemory with ref ${ref} failed:`, err);
         }
-        return Uint8Array.from(Buffer.from(resp.data, 'base64'));
-    } catch {
-        return null;
     }
+    return null;
 }
 
 // ---------------------------------------------------------------------------

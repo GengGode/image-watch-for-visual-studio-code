@@ -143,10 +143,40 @@ export function matchesType(fmt: CompiledFormat, typeStr: string): boolean {
 }
 
 export function matchesMembers(fmt: CompiledFormat, variables: any[]): boolean {
-    if (variables.length !== fmt.descriptor.members.length) {
-        return false;
+    const names = new Set(variables.map(v => v.name));
+    const required = getMappingFields(fmt.descriptor.mapping);
+    return required.every(name => names.has(name));
+}
+
+function getMappingFields(mapping: FieldMapping): string[] {
+    const fields: string[] = [];
+    fields.push(mapping.rows, mapping.cols);
+
+    if (typeof mapping.data === 'string') { fields.push(mapping.data); }
+
+    if (typeof mapping.step === 'string') {
+        fields.push(mapping.step);
+    } else if ('field' in mapping.step) {
+        fields.push((mapping.step as StepMappingOpenCV).field);
     }
-    return variables.every((v, i) => v.name === fmt.descriptor.members[i]);
+
+    if (typeof mapping.channels === 'string') {
+        fields.push(mapping.channels);
+    } else if ('fromFlags' in mapping.channels) {
+        fields.push((mapping.channels as ChannelMappingFromFlags).fromFlags);
+    } else if ('field' in mapping.channels) {
+        fields.push((mapping.channels as ChannelMappingCustom).field);
+    }
+
+    if (typeof mapping.depth === 'string') {
+        fields.push(mapping.depth);
+    } else if ('fromFlags' in mapping.depth) {
+        fields.push((mapping.depth as DepthMappingFromFlags).fromFlags);
+    } else if ('field' in mapping.depth) {
+        fields.push((mapping.depth as DepthMappingFromField | DepthMappingCustom).field);
+    }
+
+    return [...new Set(fields)];
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +198,8 @@ function parseAnyPointer(variable: any): Ptr {
     const hex = raw.length < 18
         ? '0x' + raw.slice(2).padStart(16, '0')
         : raw.substring(0, 18);
-    return { addr: parseInt(hex), hex };
+    const bigVal = BigInt(hex);
+    return { addr: Number(bigVal), hex };
 }
 
 function parseIntValue(variable: any): number {
@@ -183,18 +214,32 @@ function parseSizeT(variable: any): number {
 
 function parseOpenCVStep(variable: any): number[] {
     const step_str = String(variable.value);
+
     const bufMatch = step_str.match(/buf=\S+\s*\{([^}]*)\}/);
-    let buf_array: number[] = [];
     if (bufMatch && bufMatch[1]) {
-        buf_array = bufMatch[1].split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+        const arr = bufMatch[1].split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0);
+        if (arr.length > 0) { return arr; }
     }
-    const firstMatch = step_str.match(/\{(\d+)\}/);
-    if (firstMatch && firstMatch[1]) {
-        if (buf_array.length === 0 || buf_array[0] !== parseInt(firstMatch[1])) {
-            buf_array.unshift(parseInt(firstMatch[1]));
-        }
+
+    const braceMatch = step_str.match(/\{([^}]+)\}/);
+    if (braceMatch && braceMatch[1]) {
+        const arr = braceMatch[1].split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0);
+        if (arr.length > 0) { return arr; }
     }
-    return buf_array;
+
+    const bracketMatch = step_str.match(/\[([^\]]+)\]/);
+    if (bracketMatch && bracketMatch[1]) {
+        const arr = bracketMatch[1].split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0);
+        if (arr.length > 0) { return arr; }
+    }
+
+    const plainNumbers = step_str.match(/\d+/g);
+    if (plainNumbers) {
+        const arr = plainNumbers.map(s => parseInt(s)).filter(n => n > 0);
+        if (arr.length > 0) { return arr; }
+    }
+
+    return [];
 }
 
 function byteSizeToCvDepth(byteSize: number, preferFloat: boolean): number {
@@ -283,19 +328,24 @@ function resolveChannels(mapping: ChannelMapping, variables: any[]): number {
     return 1;
 }
 
-function resolveStep(mapping: StepMapping, variables: any[]): number[] {
+function resolveStep(mapping: StepMapping, variables: any[], cols: number, channels: number, cvDepth: number): number[] {
+    const elemSize1 = [1, 1, 2, 2, 4, 4, 8][cvDepth] ?? 1;
+    const fallback = [cols * channels * elemSize1];
+
     if (typeof mapping === 'string') {
         const m = findMember(variables, mapping);
-        if (!m) { return [0]; }
-        return [parseSizeT(m)];
+        if (!m) { return fallback; }
+        const val = parseSizeT(m);
+        return val > 0 ? [val] : fallback;
     }
     if ('interpret' in mapping) {
         const sm = mapping as StepMappingOpenCV;
         const m = findMember(variables, sm.field);
-        if (!m) { return [0]; }
-        return parseOpenCVStep(m);
+        if (!m) { return fallback; }
+        const result = parseOpenCVStep(m);
+        return result.length > 0 && result[0] > 0 ? result : fallback;
     }
-    return [0];
+    return fallback;
 }
 
 function evalSimpleExpr(expr: string, vars: Record<string, number>): number {
@@ -355,7 +405,7 @@ export function extractImageInfo(
     const channels = resolveChannels(m.channels, variables);
     const cvDepth = resolveDepth(m.depth, variables);
     const dataPtr = parseAnyPointer(dataVar);
-    const step = resolveStep(m.step, variables);
+    const step = resolveStep(m.step, variables, cols, channels, cvDepth);
 
     if (step[0] <= 0) { return null; }
 

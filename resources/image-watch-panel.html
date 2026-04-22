@@ -195,14 +195,17 @@
 
     function array_from_memory(memory, type) {
         const depth = type & 7;
+        if (depth === 0 || depth === 1) { return memory; }
+        const aligned = memory.buffer.byteLength === memory.byteLength && memory.byteOffset === 0
+            ? memory.buffer
+            : memory.buffer.slice(memory.byteOffset, memory.byteOffset + memory.byteLength);
         switch (depth) {
-            case 0: case 1: return memory;
-            case 2: return new Uint16Array(memory.buffer, memory.byteOffset, memory.byteLength / 2);
-            case 3: return new Int16Array(memory.buffer, memory.byteOffset, memory.byteLength / 2);
-            case 4: return new Int32Array(memory.buffer, memory.byteOffset, memory.byteLength / 4);
-            case 5: return new Float32Array(memory.buffer, memory.byteOffset, memory.byteLength / 4);
-            case 6: return new Float64Array(memory.buffer, memory.byteOffset, memory.byteLength / 8);
-            default: throw new Error('Unsupported depth: ' + depth);
+            case 2: return new Uint16Array(aligned);
+            case 3: return new Int16Array(aligned);
+            case 4: return new Int32Array(aligned);
+            case 5: return new Float32Array(aligned);
+            case 6: return new Float64Array(aligned);
+            default: return memory;
         }
     }
 
@@ -213,20 +216,26 @@
 
         if (!state.cvReady) { console.error('OpenCV.js 尚未加载'); return; }
 
+        const mem = memory instanceof Uint8Array
+            ? memory
+            : new Uint8Array(memory);
+
         let image = null;
 
         const depth = mat_type & 7;
         const channels = ((mat_type >> 3) & 63) + 1;
         const elemSize1 = [1, 1, 2, 2, 4, 4, 8][depth];
         const rowBytes = mat.cols * channels * elemSize1;
-        const srcStep = mat.step[0];
+        const srcStep = (mat.step && mat.step.length > 0 && mat.step[0] > 0)
+            ? mat.step[0]
+            : rowBytes;
 
         const use_addr = mat.data.addr;
         const addr = mat.datastart.addr;
-        const skip = use_addr - addr;
+        const skip = Math.max(0, use_addr - addr);
 
         if (skip === 0 && srcStep === rowBytes) {
-            const array = array_from_memory(memory, mat_type);
+            const array = array_from_memory(mem, mat_type);
             const expected = mat.rows * mat.cols * channels;
             const safe = array.length > expected ? array.subarray(0, expected) : array;
             image = new state.cvInstance.matFromArray(mat.rows, mat.cols, mat_type, safe);
@@ -235,10 +244,12 @@
             for (let row = 0; row < mat.rows; row++) {
                 const srcOff = skip + row * srcStep;
                 const dstOff = row * rowBytes;
-                image.data.set(
-                    memory.subarray(srcOff, srcOff + rowBytes),
-                    dstOff
-                );
+                if (srcOff + rowBytes <= mem.length) {
+                    image.data.set(
+                        mem.subarray(srcOff, srcOff + rowBytes),
+                        dstOff
+                    );
+                }
             }
         }
 
@@ -252,7 +263,7 @@
         image.delete();
 
         v.name = variable_name;
-        v.memory = memory.length;
+        v.memory = mem.length;
         v.id = variable_name + '_' + Date.now();
         v.dataAddrHex = mat.data.hex || '';
         v.step = mat.step || [];
